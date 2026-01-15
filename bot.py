@@ -1,33 +1,12 @@
-"""
-Discord 보스젠 알림봇 (버튼: 컷 / 멍)
-- 보스 6개: 베지, 멘지, 부활, 각성 (6시간) / 악계, 인과 (12시간)
-- 특정 채널에 "보스 젠 관리 패널" 1개를 올리고, 버튼으로 시간 갱신
-- 컷: 누른 시각(초까지) 기준으로 next_spawn = now + interval
-- 멍: 누른 시각이 아니라 "기존 next_spawn" 기준으로 next_spawn = next_spawn + interval
-- 봇 재시작해도 state.json 저장값으로 복구 + 버튼 지속(persistent view)
-
-실행 준비:
-1) pip install -U discord.py python-dotenv
-2) 같은 폴더에 .env 파일 생성 후 아래 입력:
-   DISCORD_TOKEN=너의봇토큰
-   CHANNEL_ID=알림채널ID(숫자)
-
-3) 봇에 권한: Send Messages, Read Message History, Use Application Commands(선택), Use External Emojis(선택)
-4) python bot.py 로 실행
-
-주의:
-- 버튼 지속(persistent view)은 봇 재시작 시에도 살아있지만, 코드를 수정/재배포 후에도 항상 on_ready에서 add_view가 호출되어야 합니다.
-"""
-
 import os
 import json
 import asyncio
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional, Any
+from typing import Dict, Any, Optional
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -36,14 +15,15 @@ TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 CHANNEL_ID_RAW = os.getenv("CHANNEL_ID", "").strip()
 
 if not TOKEN:
-    raise SystemExit("DISCORD_TOKEN 이 없습니다. .env에 DISCORD_TOKEN=... 넣어주세요.")
+    raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
 if not CHANNEL_ID_RAW.isdigit():
-    raise SystemExit("CHANNEL_ID 가 올바르지 않습니다. .env에 CHANNEL_ID=숫자 넣어주세요.")
+    raise SystemExit("CHANNEL_ID 가 올바르지 않습니다. Render Env에 CHANNEL_ID=숫자를 넣어주세요.")
 
 CHANNEL_ID = int(CHANNEL_ID_RAW)
 
 STATE_FILE = "boss_state.json"
 
+# 보스 리젠 규칙(시간)
 BOSSES: Dict[str, int] = {
     "베지": 6,
     "멘지": 6,
@@ -53,11 +33,7 @@ BOSSES: Dict[str, int] = {
     "인과": 12,
 }
 
-
-@dataclass
-class BossState:
-    next_spawn: Optional[int] = None  # unix seconds
-    last_cut: Optional[int] = None    # unix seconds
+FIVE_MIN = 5 * 60
 
 
 def now_ts() -> int:
@@ -74,16 +50,12 @@ def load_state() -> Dict[str, Any]:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        # 파일이 깨졌을 때 최소 복구
         data = {}
 
     panel_message_id = data.get("panel_message_id")
     bosses_data = data.get("bosses", {})
 
-    normalized = {
-        "panel_message_id": panel_message_id,
-        "bosses": {},
-    }
+    normalized = {"panel_message_id": panel_message_id, "bosses": {}}
     for name in BOSSES.keys():
         b = bosses_data.get(name, {})
         normalized["bosses"][name] = {
@@ -98,11 +70,75 @@ def save_state(state: Dict[str, Any]) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def parse_time_to_ts(text: str) -> Optional[int]:
+    """
+    입력 지원:
+    - HH:MM
+    - HH:MM:SS
+    - YYYY-MM-DD HH:MM
+    - YYYY-MM-DD HH:MM:SS
+
+    HH:MM 형태면 "오늘" 기준으로 잡고,
+    만약 이미 지난 시간이면 "내일"로 넘김.
+    """
+    text = text.strip()
+
+    # 1) YYYY-MM-DD HH:MM(:SS)
+    try:
+        if " " in text and "-" in text:
+            # 예: 2026-01-15 21:30 or 2026-01-15 21:30:10
+            date_part, time_part = text.split(" ", 1)
+            y, m, d = map(int, date_part.split("-"))
+            tparts = list(map(int, time_part.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+
+            # 로컬 시간 기준(서버가 UTC일 수도 있으니, 디스코드 표시용은 unix로 충분)
+            import datetime
+            dt = datetime.datetime(y, m, d, hh, mm, ss)
+            return int(dt.timestamp())
+    except Exception:
+        pass
+
+    # 2) HH:MM(:SS)
+    try:
+        if ":" in text and "-" not in text:
+            tparts = list(map(int, text.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+
+            import datetime
+            now = datetime.datetime.now()
+            dt = datetime.datetime(now.year, now.month, now.day, hh, mm, ss)
+
+            ts = int(dt.timestamp())
+            if ts <= now_ts():
+                # 이미 지난 시간이면 내일로
+                dt = dt + datetime.timedelta(days=1)
+                ts = int(dt.timestamp())
+            return ts
+    except Exception:
+        pass
+
+    return None
+
+
 def render_panel_text(state: Dict[str, Any]) -> str:
     lines = []
     lines.append("**보스 젠 관리 패널 (버튼: 컷 / 멍)**")
-    lines.append("- 컷: 지금 시간 기준으로 다음 젠 자동 등록")
-    lines.append("- 멍: (안뜸) 기존 다음 젠 시간 기준으로 +리젠시간 만큼 밀기")
+    lines.append("- 컷: 지금 잡힘(현재시간 기준으로 다음 젠 등록)")
+    lines.append("- 멍: 미젠(기존 다음 젠 시간 기준으로 +리젠시간 연장)")
+    lines.append("- 채팅 설정: `/설정 보스명 시간` (예: `/설정 베지 21:30` 또는 `/설정 베지 2026-01-20 09:10`)")
     lines.append("")
     lines.append("**현재 다음 젠 시간**")
 
@@ -113,8 +149,9 @@ def render_panel_text(state: Dict[str, Any]) -> str:
             lines.append(f"- {name} ({hours}h): <t:{ns}:F>  |  <t:{ns}:R>")
         else:
             lines.append(f"- {name} ({hours}h): 미등록")
+
     lines.append("")
-    lines.append("※ 버튼 눌렀는데 반응이 없다면, 봇이 해당 채널에서 메시지/상호작용 권한이 있는지 확인해주세요.")
+    lines.append("※ 알림: 5분 전 1회 + 정시 1회")
     return "\n".join(lines)
 
 
@@ -123,8 +160,7 @@ class BossPanelView(discord.ui.View):
         super().__init__(timeout=None)  # persistent
         self.bot = bot
 
-        # 버튼 12개: 보스6 * (컷/멍)
-        # 한 줄에 5개 제한 -> row 0~2로 배치
+        # 디스코드 버튼 한 줄 최대 5개 제한 -> row 자동 배치
         row = 0
         col = 0
 
@@ -134,13 +170,11 @@ class BossPanelView(discord.ui.View):
             col = 0
 
         for boss_name in BOSSES.keys():
-            # 컷 버튼
             self.add_item(BossButton(bot, boss_name, action="컷", row=row))
             col += 1
             if col >= 5:
                 next_row()
 
-            # 멍 버튼
             self.add_item(BossButton(bot, boss_name, action="멍", row=row))
             col += 1
             if col >= 5:
@@ -155,43 +189,64 @@ class BossButton(discord.ui.Button):
 
         label = f"{boss_name} {action}"
         style = discord.ButtonStyle.success if action == "컷" else discord.ButtonStyle.secondary
-
-        # custom_id는 persistent view에서 중요(고유해야 함)
         custom_id = f"boss:{boss_name}:{action}"
-
         super().__init__(label=label, style=style, custom_id=custom_id, row=row)
 
-async def callback(self, interaction: discord.Interaction):
-    # 채널 제한
-    if interaction.channel_id != CHANNEL_ID:
+    async def callback(self, interaction: discord.Interaction):
+        # 지정 채널 제한
+        if interaction.channel_id != CHANNEL_ID:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
+                    ephemeral=True,
+                )
+            return
+
+        # 3초 제한 때문에 먼저 ACK
         if not interaction.response.is_done():
-            await interaction.response.send_message(
-                f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
-                ephemeral=True,
-            )
-        else:
+            await interaction.response.defer(ephemeral=True)
+
+        state = self.bot.state_data  # type: ignore[attr-defined]
+        bosses_data = state["bosses"]
+        hours = BOSSES[self.boss_name]
+        interval_sec = hours * 3600
+
+        cur = bosses_data[self.boss_name]
+        ns_before = cur.get("next_spawn")
+
+        if self.action == "컷":
+            n = now_ts()
+            cur["last_cut"] = n
+            cur["next_spawn"] = n + interval_sec
+            save_state(state)
+
+            await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
+            await self.bot.update_panel_message()           # type: ignore[attr-defined]
+
+            ns_after = cur["next_spawn"]
             await interaction.followup.send(
-                f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
+                f"✅ **{self.boss_name} 컷 처리**\n"
+                f"- 컷: <t:{cur['last_cut']}:F>\n"
+                f"- 다음 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
                 ephemeral=True,
             )
-        return
+            return
 
-    # 3초 제한 때문에 먼저 ACK(응답 예약)
-    if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True)
+        # 멍: 기존 next_spawn 기준으로 연장
+        if not isinstance(ns_before, int) or ns_before <= 0:
+            await interaction.followup.send(
+                f"⚠️ **{self.boss_name}** 는 아직 다음 젠이 미등록입니다.\n"
+                f"먼저 **{self.boss_name} 컷** 또는 `/설정`으로 등록해주세요.",
+                ephemeral=True,
+            )
+            return
 
-    state = self.bot.state_data  # type: ignore[attr-defined]
-    bosses_data = state["bosses"]
-    hours = BOSSES[self.boss_name]
-    interval_sec = hours * 3600
-
-    cur = bosses_data[self.boss_name]
-    ns_before = cur.get("next_spawn")
-
-    if self.action == "컷":
-        n = now_ts()
-        cur["last_cut"] = n
-        cur["next_spawn"] = n + interval_sec
+        cur["next_spawn"] = ns_before + interval_sec
         save_state(state)
 
         await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
@@ -199,148 +254,140 @@ async def callback(self, interaction: discord.Interaction):
 
         ns_after = cur["next_spawn"]
         await interaction.followup.send(
-            f"✅ **{self.boss_name} 컷 처리**\n"
-            f"- 컷: <t:{cur['last_cut']}:F>\n"
-            f"- 다음 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
+            f"🟨 **{self.boss_name} 멍 처리** (기존 젠 기준 연장)\n"
+            f"- 기존 젠: <t:{ns_before}:F>\n"
+            f"- 변경 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
             ephemeral=True,
         )
-        return
 
-    # 멍 처리
-    if not isinstance(ns_before, int) or ns_before <= 0:
-        await interaction.followup.send(
-            f"⚠️ **{self.boss_name}** 는 아직 다음 젠이 미등록입니다.\n"
-            f"먼저 **{self.boss_name} 컷**을 눌러 등록해주세요.",
-            ephemeral=True,
-        )
-        return
-
-    cur["next_spawn"] = ns_before + interval_sec
-    save_state(state)
-
-    await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
-    await self.bot.update_panel_message()           # type: ignore[attr-defined]
-
-    ns_after = cur["next_spawn"]
-    await interaction.followup.send(
-        f"🟨 **{self.boss_name} 멍 처리** (기존 젠 기준으로 연장)\n"
-        f"- 기존 젠: <t:{ns_before}:F>\n"
-        f"- 변경 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
-        ephemeral=True,
-    )
 
 class BossBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        # 버튼 기반이라 message_content 필요 없음
+        # 슬래시 커맨드 기반이라 message_content 불필요
         super().__init__(command_prefix="!", intents=intents)
 
         self.state_data: Dict[str, Any] = load_state()
-        self.panel_view = None
+        self.panel_view: Optional[BossPanelView] = None
 
-        # 보스별 예약 task 핸들
-        self.spawn_tasks: Dict[str, asyncio.Task] = {}
+        # 보스별 알림 task (각 보스당 1개)
+        self.alarm_tasks: Dict[str, asyncio.Task] = {}
 
     async def setup_hook(self):
-        # 이벤트 루프가 준비된 뒤 View 생성 (no running event loop 방지)
+        # 이벤트 루프 준비된 후 View 생성
         self.panel_view = BossPanelView(self)
         self.add_view(self.panel_view)
+
+        # 슬래시 커맨드 sync
+        await self.tree.sync()
 
     async def on_ready(self):
         print(f"Logged in as: {self.user} (id: {self.user.id})")
 
-        # 패널 메시지 보장
         await self.ensure_panel_message()
 
-        # 저장된 next_spawn로 스케줄 복구
+        # 저장된 next_spawn 복구 스케줄
         for boss_name in BOSSES.keys():
             await self.reschedule_boss(boss_name)
 
-        # 패널 텍스트 최신화
         await self.update_panel_message()
 
     async def ensure_panel_message(self):
         channel = self.get_channel(CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            # 캐시에 없으면 fetch
-            channel = await self.fetch_channel(CHANNEL_ID)  # type: ignore[assignment]
-        assert isinstance(channel, discord.TextChannel)
+        if channel is None:
+            channel = await self.fetch_channel(CHANNEL_ID)
+
+        if not hasattr(channel, "send"):
+            raise SystemExit("CHANNEL_ID가 메시지를 보낼 수 있는 채널이 아닙니다. 텍스트 채널(#) ID를 넣어주세요.")
 
         msg_id = self.state_data.get("panel_message_id")
-
         if isinstance(msg_id, int):
             try:
-                msg = await channel.fetch_message(msg_id)
-                # 메시지가 존재하면 OK
+                msg = await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
                 return
-            except discord.NotFound:
-                pass
-            except discord.Forbidden:
-                raise SystemExit("봇이 채널 메시지 읽기 권한(Read Message History)이 없습니다.")
             except Exception:
                 pass
 
-        # 없으면 새로 생성
         content = render_panel_text(self.state_data)
-        msg = await channel.send(content=content, view=self.panel_view)
+        msg = await channel.send(content=content, view=self.panel_view)  # type: ignore[attr-defined]
         self.state_data["panel_message_id"] = msg.id
         save_state(self.state_data)
 
     async def update_panel_message(self):
         channel = self.get_channel(CHANNEL_ID)
-        if channel is None or not isinstance(channel, discord.TextChannel):
-            channel = await self.fetch_channel(CHANNEL_ID)  # type: ignore[assignment]
-        assert isinstance(channel, discord.TextChannel)
+        if channel is None:
+            channel = await self.fetch_channel(CHANNEL_ID)
+
+        if not hasattr(channel, "send"):
+            return
 
         msg_id = self.state_data.get("panel_message_id")
         if not isinstance(msg_id, int):
             return
 
         try:
-            msg = await channel.fetch_message(msg_id)
+            msg = await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
             await msg.edit(content=render_panel_text(self.state_data), view=self.panel_view)
-        except discord.NotFound:
-            # 패널이 삭제됐으면 재생성
+        except Exception:
+            # 패널이 삭제되었거나 권한 문제면 재생성 시도
             self.state_data["panel_message_id"] = None
             save_state(self.state_data)
-            await self.ensure_panel_message()
-        except discord.Forbidden:
-            # 편집 권한이 없을 때
-            pass
+            try:
+                await self.ensure_panel_message()
+            except Exception:
+                pass
 
     async def reschedule_boss(self, boss_name: str):
         # 기존 task 취소
-        t = self.spawn_tasks.get(boss_name)
+        t = self.alarm_tasks.get(boss_name)
         if t and not t.done():
             t.cancel()
 
         ns = self.state_data["bosses"][boss_name].get("next_spawn")
         if not isinstance(ns, int) or ns <= 0:
-            self.spawn_tasks.pop(boss_name, None)
+            self.alarm_tasks.pop(boss_name, None)
             return
 
-        self.spawn_tasks[boss_name] = asyncio.create_task(self._spawn_alarm_task(boss_name, ns))
+        self.alarm_tasks[boss_name] = asyncio.create_task(self._alarm_task(boss_name, ns))
 
-    async def _spawn_alarm_task(self, boss_name: str, target_ts: int):
+    async def _alarm_task(self, boss_name: str, target_ts: int):
         try:
-            # target_ts까지 sleep
-            wait = max(0, target_ts - now_ts())
-            if wait > 0:
-                await asyncio.sleep(wait)
-
-            # 알림 전송
             channel = self.get_channel(CHANNEL_ID)
-            if channel is None or not isinstance(channel, discord.TextChannel):
-                channel = await self.fetch_channel(CHANNEL_ID)  # type: ignore[assignment]
-            assert isinstance(channel, discord.TextChannel)
+            if channel is None:
+                channel = await self.fetch_channel(CHANNEL_ID)
+            if not hasattr(channel, "send"):
+                return
 
-            hours = BOSSES[boss_name]
-            await channel.send(
-                f"🔔 **{boss_name} 젠 시간입니다!** ({hours}h)\n"
-                f"- 예정 젠: <t:{target_ts}:F> | <t:{target_ts}:R>\n"
-                f"※ 실제로 잡았으면 패널에서 **{boss_name} 컷**을 눌러 다음 젠을 갱신하세요.\n"
-                f"※ 안 떴으면 **{boss_name} 멍**으로 기존 젠 기준 연장하세요."
-            )
+            # 5분 전 알림 시각
+            five_before = target_ts - FIVE_MIN
+
+            # 1) 5분 전 알림
+            wait1 = five_before - now_ts()
+            if wait1 > 0:
+                await asyncio.sleep(wait1)
+
+            # 스케줄이 바뀌었을 수도 있으니 최신값 확인
+            latest = self.state_data["bosses"][boss_name].get("next_spawn")
+            if latest != target_ts:
+                return
+
+            # five_before가 이미 지난 경우에도, target이 아직 남아있으면 5분전 알림 생략 가능
+            if now_ts() < target_ts:
+                # five_before 기준으로 늦게 깨어났더라도 target 이전이면 5분 전 알림 송출
+                # (원치 않으면 아래 if를 now_ts() <= five_before + 2 같은 식으로 더 타이트하게 조정 가능)
+                if now_ts() >= five_before:
+                    await channel.send(f"⏰ **{boss_name} 5분 전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
+
+            # 2) 정시 알림
+            wait2 = target_ts - now_ts()
+            if wait2 > 0:
+                await asyncio.sleep(wait2)
+
+            latest2 = self.state_data["bosses"][boss_name].get("next_spawn")
+            if latest2 != target_ts:
+                return
+
+            await channel.send(f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
 
         except asyncio.CancelledError:
             return
@@ -348,8 +395,59 @@ class BossBot(commands.Bot):
             print(f"[ERROR] alarm task for {boss_name}: {e}")
 
 
+bot = BossBot()
+
+
+# -----------------------------
+# 슬래시 커맨드: /설정, /다음젠
+# -----------------------------
+@bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다. 예) /설정 베지 21:30 또는 /설정 베지 2026-01-20 09:10")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
+async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
+    if interaction.channel_id != CHANNEL_ID:
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        return
+
+    보스 = 보스.strip()
+    if 보스 not in BOSSES:
+        await interaction.response.send_message(f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}", ephemeral=True)
+        return
+
+    ts = parse_time_to_ts(시간)
+    if ts is None:
+        await interaction.response.send_message("시간 형식이 올바르지 않습니다. 예: 21:30 / 21:30:10 / 2026-01-20 09:10", ephemeral=True)
+        return
+
+    bot.state_data["bosses"][보스]["next_spawn"] = ts
+    save_state(bot.state_data)
+
+    await bot.reschedule_boss(보스)
+    await bot.update_panel_message()
+
+    await interaction.response.send_message(
+        f"✅ **{보스} 다음 젠 시간 설정 완료**\n- 다음 젠: <t:{ts}:F> | <t:{ts}:R>",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="다음젠", description="전체 보스의 다음 젠 시간을 보여줍니다.")
+async def show_next(interaction: discord.Interaction):
+    if interaction.channel_id != CHANNEL_ID:
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        return
+
+    lines = ["**다음 젠 목록**"]
+    for name, hours in BOSSES.items():
+        ns = bot.state_data["bosses"][name].get("next_spawn")
+        if isinstance(ns, int) and ns > 0:
+            lines.append(f"- {name}({hours}h): <t:{ns}:F> | <t:{ns}:R>")
+        else:
+            lines.append(f"- {name}({hours}h): 미등록")
+
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
 def main():
-    bot = BossBot()
     bot.run(TOKEN)
 
 
