@@ -161,63 +161,73 @@ class BossButton(discord.ui.Button):
 
         super().__init__(label=label, style=style, custom_id=custom_id, row=row)
 
-    async def callback(self, interaction: discord.Interaction):
-        # 채널 제한 (다른 채널에서 눌러도 무시/안내)
-        if interaction.channel_id != CHANNEL_ID:
+async def callback(self, interaction: discord.Interaction):
+    # 채널 제한
+    if interaction.channel_id != CHANNEL_ID:
+        if not interaction.response.is_done():
             await interaction.response.send_message(
                 f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
                 ephemeral=True,
             )
-            return
-
-        state = self.bot.state_data  # type: ignore[attr-defined]
-        bosses_data = state["bosses"]
-        hours = BOSSES[self.boss_name]
-        interval_sec = hours * 3600
-
-        cur = bosses_data[self.boss_name]
-        ns_before = cur.get("next_spawn")
-
-        if self.action == "컷":
-            n = now_ts()
-            cur["last_cut"] = n
-            cur["next_spawn"] = n + interval_sec
-            save_state(state)
-            await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
-            await self.bot.update_panel_message()           # type: ignore[attr-defined]
-
-            ns_after = cur["next_spawn"]
-            await interaction.response.send_message(
-                f"✅ **{self.boss_name} 컷 처리**\n"
-                f"- 컷: <t:{cur['last_cut']}:F>\n"
-                f"- 다음 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
+        else:
+            await interaction.followup.send(
+                f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
                 ephemeral=True,
             )
-            return
+        return
 
-        # 멍
-        if not isinstance(ns_before, int) or ns_before <= 0:
-            await interaction.response.send_message(
-                f"⚠️ **{self.boss_name}** 는 아직 다음 젠이 미등록입니다.\n"
-                f"먼저 **{self.boss_name} 컷**을 눌러 등록해주세요.",
-                ephemeral=True,
-            )
-            return
+    # 3초 제한 때문에 먼저 ACK(응답 예약)
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
 
-        # 멍은 '기존 next_spawn' 기준으로 +interval
-        cur["next_spawn"] = ns_before + interval_sec
+    state = self.bot.state_data  # type: ignore[attr-defined]
+    bosses_data = state["bosses"]
+    hours = BOSSES[self.boss_name]
+    interval_sec = hours * 3600
+
+    cur = bosses_data[self.boss_name]
+    ns_before = cur.get("next_spawn")
+
+    if self.action == "컷":
+        n = now_ts()
+        cur["last_cut"] = n
+        cur["next_spawn"] = n + interval_sec
         save_state(state)
+
         await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
         await self.bot.update_panel_message()           # type: ignore[attr-defined]
 
         ns_after = cur["next_spawn"]
-        await interaction.response.send_message(
-            f"🟨 **{self.boss_name} 멍 처리** (기존 젠 기준으로 연장)\n"
-            f"- 기존 젠: <t:{ns_before}:F>\n"
-            f"- 변경 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
+        await interaction.followup.send(
+            f"✅ **{self.boss_name} 컷 처리**\n"
+            f"- 컷: <t:{cur['last_cut']}:F>\n"
+            f"- 다음 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
             ephemeral=True,
         )
+        return
 
+    # 멍 처리
+    if not isinstance(ns_before, int) or ns_before <= 0:
+        await interaction.followup.send(
+            f"⚠️ **{self.boss_name}** 는 아직 다음 젠이 미등록입니다.\n"
+            f"먼저 **{self.boss_name} 컷**을 눌러 등록해주세요.",
+            ephemeral=True,
+        )
+        return
+
+    cur["next_spawn"] = ns_before + interval_sec
+    save_state(state)
+
+    await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
+    await self.bot.update_panel_message()           # type: ignore[attr-defined]
+
+    ns_after = cur["next_spawn"]
+    await interaction.followup.send(
+        f"🟨 **{self.boss_name} 멍 처리** (기존 젠 기준으로 연장)\n"
+        f"- 기존 젠: <t:{ns_before}:F>\n"
+        f"- 변경 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
+        ephemeral=True,
+    )
 
 class BossBot(commands.Bot):
     def __init__(self):
