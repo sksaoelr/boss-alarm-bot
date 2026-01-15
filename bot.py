@@ -226,13 +226,14 @@ class BossBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
         self.state_data: Dict[str, Any] = load_state()
-        self.panel_view = BossPanelView(self)
+        self.panel_view = None
 
         # 보스별 예약 task 핸들
         self.spawn_tasks: Dict[str, asyncio.Task] = {}
 
     async def setup_hook(self):
-        # persistent view 등록(재시작 후 버튼 유지)
+        # 이벤트 루프가 준비된 뒤 View 생성 (no running event loop 방지)
+        self.panel_view = BossPanelView(self)
         self.add_view(self.panel_view)
 
     async def on_ready(self):
