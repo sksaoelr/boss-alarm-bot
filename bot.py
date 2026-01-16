@@ -8,6 +8,10 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
+import datetime
+import pytz
+
+KST = pytz.timezone("Asia/Seoul")
 
 load_dotenv()
 
@@ -78,15 +82,14 @@ def parse_time_to_ts(text: str) -> Optional[int]:
     - YYYY-MM-DD HH:MM
     - YYYY-MM-DD HH:MM:SS
 
-    HH:MM 형태면 "오늘" 기준으로 잡고,
-    만약 이미 지난 시간이면 "내일"로 넘김.
+    HH:MM 형태면 "오늘(KST)" 기준으로 잡고,
+    만약 이미 지난 시간이면 "내일(KST)"로 넘김.
     """
     text = text.strip()
 
     # 1) YYYY-MM-DD HH:MM(:SS)
     try:
         if " " in text and "-" in text:
-            # 예: 2026-01-15 21:30 or 2026-01-15 21:30:10
             date_part, time_part = text.split(" ", 1)
             y, m, d = map(int, date_part.split("-"))
             tparts = list(map(int, time_part.split(":")))
@@ -98,9 +101,7 @@ def parse_time_to_ts(text: str) -> Optional[int]:
             else:
                 return None
 
-            # 로컬 시간 기준(서버가 UTC일 수도 있으니, 디스코드 표시용은 unix로 충분)
-            import datetime
-            dt = datetime.datetime(y, m, d, hh, mm, ss)
+            dt = KST.localize(datetime.datetime(y, m, d, hh, mm, ss))
             return int(dt.timestamp())
     except Exception:
         pass
@@ -117,13 +118,11 @@ def parse_time_to_ts(text: str) -> Optional[int]:
             else:
                 return None
 
-            import datetime
-            now = datetime.datetime.now()
-            dt = datetime.datetime(now.year, now.month, now.day, hh, mm, ss)
+            now = datetime.datetime.now(KST)
+            dt = KST.localize(datetime.datetime(now.year, now.month, now.day, hh, mm, ss))
 
             ts = int(dt.timestamp())
-            if ts <= now_ts():
-                # 이미 지난 시간이면 내일로
+            if ts <= int(now.timestamp()):
                 dt = dt + datetime.timedelta(days=1)
                 ts = int(dt.timestamp())
             return ts
