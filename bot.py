@@ -282,6 +282,93 @@ class BossButton(discord.ui.Button):
         )
 
 
+class SpawnAlertView(discord.ui.View):
+    """
+    '젠타임입니다' 알림 메시지에 붙는 컷/멍 버튼.
+    - 컷: 현재시간 기준으로 +리젠시간
+    - 멍: 알림의 target_ts(원래 젠시간) 기준으로 +리젠시간
+    클릭하면: 상태 저장 + 재스케줄 + 패널 갱신 + (해당 메시지) 버튼 제거(view=None)
+    """
+    def __init__(self, bot: commands.Bot, boss_name: str, target_ts: int):
+        super().__init__(timeout=60 * 60 * 24)  # 24시간 정도면 충분 (원하면 None도 가능)
+        self.bot = bot
+        self.boss_name = boss_name
+        self.target_ts = target_ts
+
+    @discord.ui.button(label="컷", style=discord.ButtonStyle.success)
+    async def cut_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, action="컷")
+
+    @discord.ui.button(label="멍", style=discord.ButtonStyle.secondary)
+    async def miss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, action="멍")
+
+    async def _handle(self, interaction: discord.Interaction, action: str):
+        # 채널 제한
+        if interaction.channel_id != CHANNEL_ID:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
+                    ephemeral=True,
+                )
+            return
+
+        # 3초 제한 방지: 먼저 ACK
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        boss = self.boss_name
+        hours = BOSSES[boss]
+        interval_sec = hours * 3600
+
+        state = self.bot.state_data  # type: ignore[attr-defined]
+        cur = state["bosses"][boss]
+
+        if action == "컷":
+            base = now_ts()
+            cur["last_cut"] = base
+            next_spawn = base + interval_sec
+            cur["next_spawn"] = next_spawn
+        else:
+            # 멍: 알림에 찍힌 "원래 젠 시간" 기준으로 +리젠
+            base = self.target_ts
+            next_spawn = base + interval_sec
+            cur["next_spawn"] = next_spawn
+
+        save_state(state)
+
+        # 스케줄/패널 갱신
+        await self.bot.reschedule_boss(boss)     # type: ignore[attr-defined]
+        await self.bot.update_panel_message()    # type: ignore[attr-defined]
+
+        # ✅ 버튼 제거 + 메시지 내용 업데이트
+        try:
+            handled = "컷" if action == "컷" else "멍"
+            msg = interaction.message
+            await msg.edit(
+                content=(
+                    f"🔔 **{boss} 젠타임입니다!**\n"
+                    f"- 젠: <t:{self.target_ts}:F> | <t:{self.target_ts}:R>\n\n"
+                    f"✅ 처리: **{handled}** (by {interaction.user.mention})\n"
+                    f"➡️ 다음 젠: <t:{next_spawn}:F> | <t:{next_spawn}:R>"
+                ),
+                view=None,  # <-- 버튼 사라짐
+            )
+        except Exception as e:
+            print(f"[WARN] failed to edit spawn alert message: {e}")
+
+        # 사용자에게는 ephemeral 확인 메시지
+        await interaction.followup.send(
+            f"✅ **{boss} {action} 처리 완료**\n"
+            f"- 다음 젠: <t:{next_spawn}:F> | <t:{next_spawn}:R>",
+            ephemeral=True,
+        )
+
 class BossBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -408,8 +495,11 @@ class BossBot(commands.Bot):
             if latest2 != target_ts:
                 return
 
-            await channel.send(f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
-
+            await channel.send(
+                content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>",
+                view=SpawnAlertView(self, boss_name, target_ts),
+            )  # type: ignore[attr-defined]
+            
         except asyncio.CancelledError:
             return
         except Exception as e:
