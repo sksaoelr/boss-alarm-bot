@@ -510,7 +510,7 @@ bot = BossBot()
 
 
 # -----------------------------
-# 슬래시 커맨드: /설정, /다음젠
+# 슬래시 커맨드: /설정, /젠타임
 # -----------------------------
 @bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다. 예) /설정 베지 21:30 또는 /설정 베지 2026-01-20 09:10")
 @app_commands.describe(보스="베지/멘지/부활/각성/악계/인과", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
@@ -541,7 +541,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
     )
 
 
-@bot.tree.command(name="다음젠", description="전체 보스의 다음 젠 시간을 보여줍니다.")
+@bot.tree.command(name="젠타임", description="전체 보스의 다음 젠 시간을 보여줍니다.")
 async def show_next(interaction: discord.Interaction):
     if interaction.channel_id != CHANNEL_ID:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
