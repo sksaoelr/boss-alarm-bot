@@ -654,12 +654,11 @@ async def show_next(interaction: discord.Interaction):
     for name, hours in BOSSES.items():
         ns = bot.state_data["bosses"][name].get("next_spawn")
         if isinstance(ns, int) and ns > 0:
-            lines.append(f"- {fmt_kst(ns_after)}")
+            lines.append(f"- {name}({hours}h): {fmt_kst(ns)}")
         else:
             lines.append(f"- {name}({hours}h): 미등록")
-
+    
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
 
 def main():
     bot.run(TOKEN)
