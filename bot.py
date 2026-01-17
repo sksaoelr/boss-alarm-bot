@@ -39,6 +39,10 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 CHANNEL_ID_RAW = os.getenv("CHANNEL_ID", "").strip()
+VOICE_CHAT_CHANNEL_ID_RAW = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
+if not VOICE_CHAT_CHANNEL_ID_RAW.isdigit():
+    raise SystemExit("VOICE_CHAT_CHANNEL_ID 가 올바르지 않습니다. Env에 VOICE_CHAT_CHANNEL_ID=숫자를 넣어주세요.")
+VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID_RAW)
 
 if not TOKEN:
     raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
@@ -319,7 +323,7 @@ class SpawnAlertView(discord.ui.View):
 
     async def _handle(self, interaction: discord.Interaction, action: str):
         # 채널 제한
-        if interaction.channel_id != CHANNEL_ID:
+        if interaction.channel_id != VOICE_CHAT_CHANNEL_ID:
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
@@ -430,9 +434,11 @@ class BossBot(commands.Bot):
         await self.update_panel_message()
 
     async def ensure_panel_message(self):
-        channel = self.get_channel(CHANNEL_ID)
+        channel = self.get_channel(VOICE_CHAT_CHANNEL_ID)
         if channel is None:
-            channel = await self.fetch_channel(CHANNEL_ID)
+            channel = await self.fetch_channel(VOICE_CHAT_CHANNEL_ID)
+        if not hasattr(channel, "send"):
+            return
 
         if not hasattr(channel, "send"):
             raise SystemExit("CHANNEL_ID가 메시지를 보낼 수 있는 채널이 아닙니다. 텍스트 채널(#) ID를 넣어주세요.")
@@ -513,7 +519,7 @@ class BossBot(commands.Bot):
                 # five_before 기준으로 늦게 깨어났더라도 target 이전이면 5분 전 알림 송출
                 # (원치 않으면 아래 if를 now_ts() <= five_before + 2 같은 식으로 더 타이트하게 조정 가능)
                 if now_ts() >= five_before:
-                    await channel.send(f"⏰ **{boss_name} 5분 전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
+                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>",tts=True,)  # type: ignore[attr-defined]
 
             # 2) 정시 알림
             wait2 = target_ts - now_ts()
@@ -526,8 +532,9 @@ class BossBot(commands.Bot):
 
             await channel.send(
                 content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>",
+                tts=True,
                 view=SpawnAlertView(self, boss_name, target_ts),
-            )
+            )  # type: ignore[attr-defined]
             
         except asyncio.CancelledError:
             return
@@ -544,7 +551,7 @@ bot = BossBot()
 @bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다. 예) /설정 베지 21:30 또는 /설정 베지 2026-01-20 09:10")
 @app_commands.describe(보스="베지/멘지/부활/각성/악계/인과", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
-    if interaction.channel_id != CHANNEL_ID:
+    if interaction.channel_id not in (CHANNEL_ID, VOICE_CHAT_CHANNEL_ID):
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
@@ -572,7 +579,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
 @bot.tree.command(name="젠타임", description="전체 보스의 다음 젠 시간을 보여줍니다.")
 async def show_next(interaction: discord.Interaction):
-    if interaction.channel_id != CHANNEL_ID:
+    if interaction.channel_id not in (CHANNEL_ID, VOICE_CHAT_CHANNEL_ID):
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
