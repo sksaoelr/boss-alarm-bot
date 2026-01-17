@@ -569,40 +569,45 @@ class BossBot(commands.Bot):
                 channel = await self.fetch_channel(VOICE_CHAT_CHANNEL_ID)
             if not hasattr(channel, "send"):
                 return
-
-            # 5분 전 알림 시각
+    
             five_before = target_ts - FIVE_MIN
-
-            # 1) 5분 전 알림
+    
+            # 1) 5분 전 알림 (정확히 5분 전일 때만)
             wait1 = five_before - now_ts()
             if wait1 > 0:
                 await asyncio.sleep(wait1)
-
-            # 스케줄이 바뀌었을 수도 있으니 최신값 확인
+            else:
+                # 이미 5분 전이 지났으면 5분전 알림은 절대 안 함
+                pass
+    
+            # 스케줄 변경 확인 (최신 next_spawn이 target_ts인지)
             latest = self.state_data["bosses"][boss_name].get("next_spawn")
             if latest != target_ts:
                 return
-
-            # five_before가 이미 지난 경우에도, target이 아직 남아있으면 5분전 알림 생략 가능
-            if now_ts() < target_ts:
-                # five_before 기준으로 늦게 깨어났더라도 target 이전이면 5분 전 알림 송출
-                # (원치 않으면 아래 if를 now_ts() <= five_before + 2 같은 식으로 더 타이트하게 조정 가능)
-                if now_ts() >= five_before:
-                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst(target_ts)}")
+    
+            # 정확히 five_before 근처(±2초)일 때만 발송
+            if wait1 > 0 and abs(now_ts() - five_before) <= 2:
+                await channel.send(
+                    f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst(target_ts)}"
+                )
+    
             # 2) 정시 알림
             wait2 = target_ts - now_ts()
             if wait2 > 0:
                 await asyncio.sleep(wait2)
-
+            else:
+                # 이미 젠 시간이 지났으면 정시 알림도 생략
+                return
+    
             latest2 = self.state_data["bosses"][boss_name].get("next_spawn")
             if latest2 != target_ts:
                 return
-
+    
             await channel.send(
                 content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: {fmt_kst(target_ts)}",
                 view=SpawnAlertView(self, boss_name, target_ts),
             )  # type: ignore[attr-defined]
-            
+    
         except asyncio.CancelledError:
             return
         except Exception as e:
