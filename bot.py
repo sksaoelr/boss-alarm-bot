@@ -67,11 +67,17 @@ def now_ts() -> int:
 
 
 def load_state() -> Dict[str, Any]:
+    # 파일이 아예 없을 때 (최초 실행)
     if not os.path.exists(STATE_FILE):
         return {
             "panel_message_id": None,
-            "bosses": {name: {"next_spawn": None, "last_cut": None} for name in BOSSES.keys()},
+            "bosses": {
+                name: {"next_spawn": None, "last_cut": None}
+                for name in BOSSES.keys()
+            },
+            "handled_alerts": {},  # ✅ 중복 클릭 방지용
         }
+
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -80,14 +86,22 @@ def load_state() -> Dict[str, Any]:
 
     panel_message_id = data.get("panel_message_id")
     bosses_data = data.get("bosses", {})
+    handled_alerts = data.get("handled_alerts", {})
 
-    normalized = {"panel_message_id": panel_message_id, "bosses": {}}
+    # 구조 정규화 (키 누락 방지)
+    normalized = {
+        "panel_message_id": panel_message_id,
+        "bosses": {},
+        "handled_alerts": handled_alerts,  # ✅ 항상 포함
+    }
+
     for name in BOSSES.keys():
         b = bosses_data.get(name, {})
         normalized["bosses"][name] = {
             "next_spawn": b.get("next_spawn"),
             "last_cut": b.get("last_cut"),
         }
+
     return normalized
 
 
@@ -328,7 +342,22 @@ class SpawnAlertView(discord.ui.View):
 
         state = self.bot.state_data  # type: ignore[attr-defined]
         cur = state["bosses"][boss]
+        # ✅ 중복/동시 클릭 방지 (메시지 ID 기준 최초 1회만 처리)
+        handled_alerts = state.setdefault("handled_alerts", {})
+        msg_id = str(interaction.message.id)
 
+        if handled_alerts.get(msg_id):
+            await interaction.followup.send("⚠️ 이미 처리된 알림입니다.", ephemeral=True)
+            return
+
+        # 먼저 처리 표시를 남겨 동시 클릭도 막음
+        handled_alerts[msg_id] = {
+            "boss": boss,
+            "action": action,
+            "by": str(interaction.user.id),
+            "at": now_ts(),
+        }
+        save_state(state)
         if action == "컷":
             base = now_ts()
             cur["last_cut"] = base
@@ -498,7 +527,7 @@ class BossBot(commands.Bot):
             await channel.send(
                 content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>",
                 view=SpawnAlertView(self, boss_name, target_ts),
-            )  # type: ignore[attr-defined]
+            )
             
         except asyncio.CancelledError:
             return
