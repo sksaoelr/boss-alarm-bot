@@ -207,13 +207,8 @@ def parse_time_to_ts(text: str) -> Optional[int]:
     return None
 
 
-def render_panel_text(state: Dict[str, Any]) -> str:
+def render_panel_text_compact(state: Dict[str, Any]) -> str:
     lines = []
-    lines.append("**보스 젠 관리 패널 (버튼: 컷 / 멍)**")
-    lines.append("- 컷: 지금 잡힘(현재시간 기준으로 다음 젠 등록)")
-    lines.append("- 멍: 미젠(기존 다음 젠 시간 기준으로 +리젠시간 연장)")
-    lines.append("- 채팅 설정: `/설정 보스명 시간` (예: `/설정 베지 21:30` 또는 `/설정 베지 2026-01-20 09:10`)")
-    lines.append("")
     lines.append("**현재 다음 젠 시간**")
 
     bosses_data = state["bosses"]
@@ -223,9 +218,17 @@ def render_panel_text(state: Dict[str, Any]) -> str:
             lines.append(f"- {name} ({hours}h): <t:{ns}:F>  |  <t:{ns}:R>")
         else:
             lines.append(f"- {name} ({hours}h): 미등록")
+    return "\n".join(lines)
 
+def render_panel_text(state: Dict[str, Any]) -> str:
+    # 패널 최초 생성용(설명 포함)
+    lines = []
+    lines.append("**보스 젠 관리 패널 (버튼: 컷 / 멍)**")
+    lines.append("- 컷: 지금 잡힘(현재시간 기준으로 다음 젠 등록)")
+    lines.append("- 멍: 미젠(기존 다음 젠 시간 기준으로 +리젠시간 연장)")
+    lines.append("- 채팅 설정: `/설정 보스명 시간` (예: `/설정 베지 21:30` 또는 `/설정 베지 2026-01-20 09:10`)")
     lines.append("")
-    lines.append("※ 알림: 5분 전 1회 + 정시 1회")
+    lines.append(render_panel_text_compact(state))
     return "\n".join(lines)
 
 
@@ -485,28 +488,6 @@ class BossBot(commands.Bot):
             channel = await self.fetch_channel(channel_id)
 
         if not hasattr(channel, "send"):
-            raise SystemExit(f"{key} 채널 ID가 메시지를 보낼 수 있는 채널이 아닙니다.")
-
-        msg_ids = self.state_data.get("panel_message_ids") or {"admin": None, "voice": None}
-        msg_id = msg_ids.get(key)
-
-        # 기존 메시지 존재 확인
-        if isinstance(msg_id, int):
-            try:
-                await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
-                return
-            except Exception:
-                pass
-
-        # 새로 생성
-        content = render_panel_text(self.state_data)
-        msg = await channel.send(content=content, view=self.panel_view)  # type: ignore[attr-defined]
-
-        self.state_data.setdefault("panel_message_ids", {"admin": None, "voice": None})
-        self.state_data["panel_message_ids"][key] = msg.id
-        save_state(self.state_data)
-
-        if not hasattr(channel, "send"):
             raise SystemExit("CHANNEL_ID가 메시지를 보낼 수 있는 채널이 아닙니다. 텍스트 채널(#) ID를 넣어주세요.")
 
         msg_id = self.state_data.get("panel_message_ids")
@@ -527,7 +508,7 @@ class BossBot(commands.Bot):
         if not isinstance(msg_ids, dict):
             return
 
-        content = render_panel_text(self.state_data)
+        content = render_panel_text_compact(self.state_data)
 
         for key, cid in PANEL_CHANNELS.items():
             channel = self.get_channel(cid)
