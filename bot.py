@@ -38,11 +38,11 @@ KST = pytz.timezone("Asia/Seoul")
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
-CHANNEL_ID_RAW = os.getenv("CHANNEL_ID", "").strip()
-VOICE_CHAT_CHANNEL_ID_RAW = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
-if not VOICE_CHAT_CHANNEL_ID_RAW.isdigit():
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+VOICE_CHAT_CHANNEL_ID = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
+if not VOICE_CHAT_CHANNEL_ID.isdigit():
     raise SystemExit("VOICE_CHAT_CHANNEL_ID 가 올바르지 않습니다. Env에 VOICE_CHAT_CHANNEL_ID=숫자를 넣어주세요.")
-VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID_RAW)
+VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID)
 ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
 # 패널/버튼 허용 채널(관리채널 + 보이스채팅탭)
 ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
@@ -56,10 +56,10 @@ PANEL_CHANNELS = {
 
 if not TOKEN:
     raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
-if not CHANNEL_ID_RAW.isdigit():
+if not CHANNEL_ID.isdigit():
     raise SystemExit("CHANNEL_ID 가 올바르지 않습니다. Render Env에 CHANNEL_ID=숫자를 넣어주세요.")
 
-CHANNEL_ID = int(CHANNEL_ID_RAW)
+CHANNEL_ID = int(CHANNEL_ID)
 
 STATE_FILE = "boss_state.json"
 
