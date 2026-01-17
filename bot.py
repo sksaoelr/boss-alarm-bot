@@ -436,13 +436,19 @@ class BossBot(commands.Bot):
         # 보스별 알림 task (각 보스당 1개)
         self.alarm_tasks: Dict[str, asyncio.Task] = {}
 
-    async def setup_hook(self):
-        # 이벤트 루프 준비된 후 View 생성
-        self.panel_view = BossPanelView(self)
-        self.add_view(self.panel_view)
-
-        # 슬래시 커맨드 sync
-        await self.tree.sync()
+        GUILD_ID = 1461167609222529026  # 서버 ID
+        
+        async def setup_hook(self):
+            self.panel_view = BossPanelView(self)
+            self.add_view(self.panel_view)
+        
+            guild = discord.Object(id=GUILD_ID)
+        
+            # 기존 글로벌 명령 제거 (안전)
+            self.tree.clear_commands(guild=None)
+        
+            # 길드에 즉시 동기화
+            await self.tree.sync(guild=guild)
 
     async def on_ready(self):
         print(f"Logged in as: {self.user} (id: {self.user.id})")
