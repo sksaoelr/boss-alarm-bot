@@ -50,7 +50,7 @@ ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
 # 패널을 띄울 채널들 (키는 상태파일 저장용)
 PANEL_CHANNELS = {
     "admin": CHANNEL_ID,
-    "voice": VOICE_CHAT_CHANNEL_ID,
+    # "voice": VOICE_CHAT_CHANNEL_ID,
 }
 
 
@@ -613,7 +613,7 @@ bot = BossBot()
 @bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다. 예) /설정 베지 21:30 또는 /설정 베지 2026-01-20 09:10")
 @app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
-    if interaction.channel_id not in (CHANNEL_ID, VOICE_CHAT_CHANNEL_ID):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
@@ -641,7 +641,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
 @bot.tree.command(name="젠타임", description="전체 보스의 다음 젠 시간을 보여줍니다.")
 async def show_next(interaction: discord.Interaction):
-    if interaction.channel_id not in (CHANNEL_ID, VOICE_CHAT_CHANNEL_ID):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
