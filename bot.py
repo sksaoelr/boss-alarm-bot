@@ -98,13 +98,19 @@ def load_state() -> Dict[str, Any]:
     except Exception:
         data = {}
 
+    # ✅ 반드시 먼저 정의
+    handled_alerts = data.get("handled_alerts", {})
+
+    # ✅ 패널 메시지 ID들(구버전 호환 포함)
     panel_message_ids = data.get("panel_message_ids")
-    
-    # 구버전 호환: panel_message_id 하나만 있으면 admin 패널로 이관
-    legacy_panel_id = data.get("panel_message_id")
+    legacy_panel_id = data.get("panel_message_ids")
+
     if not isinstance(panel_message_ids, dict):
         panel_message_ids = {"admin": legacy_panel_id, "voice": None}
-    
+
+    bosses_data = data.get("bosses", {})
+
+    # 구조 정규화 (키 누락 방지)
     normalized = {
         "panel_message_ids": {
             "admin": panel_message_ids.get("admin"),
@@ -122,6 +128,7 @@ def load_state() -> Dict[str, Any]:
         }
 
     return normalized
+
 
 
 def save_state(state: Dict[str, Any]) -> None:
@@ -483,7 +490,7 @@ class BossBot(commands.Bot):
         if not hasattr(channel, "send"):
             raise SystemExit("CHANNEL_ID가 메시지를 보낼 수 있는 채널이 아닙니다. 텍스트 채널(#) ID를 넣어주세요.")
 
-        msg_id = self.state_data.get("panel_message_id")
+        msg_id = self.state_data.get("panel_message_ids")
         if isinstance(msg_id, int):
             try:
                 msg = await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
@@ -493,7 +500,7 @@ class BossBot(commands.Bot):
 
         content = render_panel_text(self.state_data)
         msg = await channel.send(content=content, view=self.panel_view)  # type: ignore[attr-defined]
-        self.state_data["panel_message_id"] = msg.id
+        self.state_data["panel_message_ids"] = msg.id
         save_state(self.state_data)
 
     async def update_panel_message(self):
