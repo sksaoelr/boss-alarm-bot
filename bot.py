@@ -43,6 +43,16 @@ VOICE_CHAT_CHANNEL_ID_RAW = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
 if not VOICE_CHAT_CHANNEL_ID_RAW.isdigit():
     raise SystemExit("VOICE_CHAT_CHANNEL_ID 가 올바르지 않습니다. Env에 VOICE_CHAT_CHANNEL_ID=숫자를 넣어주세요.")
 VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID_RAW)
+ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
+# 패널/버튼 허용 채널(관리채널 + 보이스채팅탭)
+ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
+
+# 패널을 띄울 채널들 (키는 상태파일 저장용)
+PANEL_CHANNELS = {
+    "admin": CHANNEL_ID,
+    "voice": VOICE_CHAT_CHANNEL_ID,
+}
+
 
 if not TOKEN:
     raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
@@ -60,7 +70,7 @@ BOSSES: Dict[str, int] = {
     "부활": 6,
     "각성": 6,
     "악계": 12,
-    "인과": 12,
+    "인과율": 12,
 }
 
 FIVE_MIN = 5 * 60
@@ -74,12 +84,12 @@ def load_state() -> Dict[str, Any]:
     # 파일이 아예 없을 때 (최초 실행)
     if not os.path.exists(STATE_FILE):
         return {
-            "panel_message_id": None,
+            "panel_message_ids": {"admin": None, "voice": None},
             "bosses": {
                 name: {"next_spawn": None, "last_cut": None}
                 for name in BOSSES.keys()
             },
-            "handled_alerts": {},  # ✅ 중복 클릭 방지용
+            "handled_alerts": {},
         }
 
     try:
@@ -88,15 +98,20 @@ def load_state() -> Dict[str, Any]:
     except Exception:
         data = {}
 
-    panel_message_id = data.get("panel_message_id")
-    bosses_data = data.get("bosses", {})
-    handled_alerts = data.get("handled_alerts", {})
-
-    # 구조 정규화 (키 누락 방지)
+    panel_message_ids = data.get("panel_message_ids")
+    
+    # 구버전 호환: panel_message_id 하나만 있으면 admin 패널로 이관
+    legacy_panel_id = data.get("panel_message_id")
+    if not isinstance(panel_message_ids, dict):
+        panel_message_ids = {"admin": legacy_panel_id, "voice": None}
+    
     normalized = {
-        "panel_message_id": panel_message_id,
+        "panel_message_ids": {
+            "admin": panel_message_ids.get("admin"),
+            "voice": panel_message_ids.get("voice"),
+        },
         "bosses": {},
-        "handled_alerts": handled_alerts,  # ✅ 항상 포함
+        "handled_alerts": handled_alerts,
     }
 
     for name in BOSSES.keys():
@@ -233,7 +248,7 @@ class BossButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         # 지정 채널 제한
-        if interaction.channel_id != CHANNEL_ID:
+        if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
@@ -323,7 +338,7 @@ class SpawnAlertView(discord.ui.View):
 
     async def _handle(self, interaction: discord.Interaction, action: str):
         # 채널 제한
-        if interaction.channel_id != VOICE_CHAT_CHANNEL_ID:
+        if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     f"이 버튼은 지정 채널에서만 사용됩니다. (채널ID: {CHANNEL_ID})",
@@ -434,11 +449,36 @@ class BossBot(commands.Bot):
         await self.update_panel_message()
 
     async def ensure_panel_message(self):
-        channel = self.get_channel(VOICE_CHAT_CHANNEL_ID)
+        # 두 채널에 패널이 모두 존재하도록 보장
+        for key, cid in PANEL_CHANNELS.items():
+            await self._ensure_panel_in_channel(key, cid)
+
+    async def _ensure_panel_in_channel(self, key: str, channel_id: int):
+        channel = self.get_channel(channel_id)
         if channel is None:
-            channel = await self.fetch_channel(VOICE_CHAT_CHANNEL_ID)
+            channel = await self.fetch_channel(channel_id)
+
         if not hasattr(channel, "send"):
-            return
+            raise SystemExit(f"{key} 채널 ID가 메시지를 보낼 수 있는 채널이 아닙니다.")
+
+        msg_ids = self.state_data.get("panel_message_ids") or {"admin": None, "voice": None}
+        msg_id = msg_ids.get(key)
+
+        # 기존 메시지 존재 확인
+        if isinstance(msg_id, int):
+            try:
+                await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
+                return
+            except Exception:
+                pass
+
+        # 새로 생성
+        content = render_panel_text(self.state_data)
+        msg = await channel.send(content=content, view=self.panel_view)  # type: ignore[attr-defined]
+
+        self.state_data.setdefault("panel_message_ids", {"admin": None, "voice": None})
+        self.state_data["panel_message_ids"][key] = msg.id
+        save_state(self.state_data)
 
         if not hasattr(channel, "send"):
             raise SystemExit("CHANNEL_ID가 메시지를 보낼 수 있는 채널이 아닙니다. 텍스트 채널(#) ID를 넣어주세요.")
@@ -457,28 +497,43 @@ class BossBot(commands.Bot):
         save_state(self.state_data)
 
     async def update_panel_message(self):
-        channel = self.get_channel(CHANNEL_ID)
-        if channel is None:
-            channel = await self.fetch_channel(CHANNEL_ID)
-
-        if not hasattr(channel, "send"):
+        msg_ids = self.state_data.get("panel_message_ids")
+        if not isinstance(msg_ids, dict):
             return
 
-        msg_id = self.state_data.get("panel_message_id")
-        if not isinstance(msg_id, int):
-            return
+        content = render_panel_text(self.state_data)
 
-        try:
-            msg = await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
-            await msg.edit(content=render_panel_text(self.state_data), view=self.panel_view)
-        except Exception:
-            # 패널이 삭제되었거나 권한 문제면 재생성 시도
-            self.state_data["panel_message_id"] = None
-            save_state(self.state_data)
+        for key, cid in PANEL_CHANNELS.items():
+            channel = self.get_channel(cid)
+            if channel is None:
+                try:
+                    channel = await self.fetch_channel(cid)
+                except Exception:
+                    continue
+
+            if not hasattr(channel, "send"):
+                continue
+
+            msg_id = msg_ids.get(key)
+            if not isinstance(msg_id, int):
+                # 없으면 생성 시도
+                try:
+                    await self._ensure_panel_in_channel(key, cid)
+                except Exception:
+                    pass
+                continue
+
             try:
-                await self.ensure_panel_message()
+                msg = await channel.fetch_message(msg_id)  # type: ignore[attr-defined]
+                await msg.edit(content=content, view=self.panel_view)
             except Exception:
-                pass
+                # 삭제/권한 문제 → ID 초기화 후 재생성
+                self.state_data["panel_message_ids"][key] = None
+                save_state(self.state_data)
+                try:
+                    await self._ensure_panel_in_channel(key, cid)
+                except Exception:
+                    pass
 
     async def reschedule_boss(self, boss_name: str):
         # 기존 task 취소
@@ -495,9 +550,9 @@ class BossBot(commands.Bot):
 
     async def _alarm_task(self, boss_name: str, target_ts: int):
         try:
-            channel = self.get_channel(CHANNEL_ID)
+            channel = self.get_channel(VOICE_CHAT_CHANNEL_ID)
             if channel is None:
-                channel = await self.fetch_channel(CHANNEL_ID)
+                channel = await self.fetch_channel(VOICE_CHAT_CHANNEL_ID)
             if not hasattr(channel, "send"):
                 return
 
@@ -549,7 +604,7 @@ bot = BossBot()
 # 슬래시 커맨드: /설정, /젠타임
 # -----------------------------
 @bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다. 예) /설정 베지 21:30 또는 /설정 베지 2026-01-20 09:10")
-@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
     if interaction.channel_id not in (CHANNEL_ID, VOICE_CHAT_CHANNEL_ID):
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
