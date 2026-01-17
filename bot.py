@@ -581,7 +581,7 @@ class BossBot(commands.Bot):
                 # five_before 기준으로 늦게 깨어났더라도 target 이전이면 5분 전 알림 송출
                 # (원치 않으면 아래 if를 now_ts() <= five_before + 2 같은 식으로 더 타이트하게 조정 가능)
                 if now_ts() >= five_before:
-                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>",tts=True,)  # type: ignore[attr-defined]
+                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
 
             # 2) 정시 알림
             wait2 = target_ts - now_ts()
@@ -594,7 +594,6 @@ class BossBot(commands.Bot):
 
             await channel.send(
                 content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>",
-                tts=True,
                 view=SpawnAlertView(self, boss_name, target_ts),
             )  # type: ignore[attr-defined]
             
