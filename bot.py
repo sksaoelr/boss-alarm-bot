@@ -15,6 +15,13 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+def fmt_kst(ts: int) -> str:
+    """
+    timestamp -> 'MM-DD HH:MM' (KST, 24h)
+    """
+    dt = datetime.datetime.fromtimestamp(ts, KST)
+    return dt.strftime("%m-%d %H:%M")
+
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -215,7 +222,7 @@ def render_panel_text_compact(state: Dict[str, Any]) -> str:
     for name, hours in BOSSES.items():
         ns = bosses_data[name].get("next_spawn")
         if isinstance(ns, int) and ns > 0:
-            lines.append(f"- {name} ({hours}h): <t:{ns}:F>  |  <t:{ns}:R>")
+            lines.append(f"- {name} ({hours}h): {fmt_kst(ns)}")
         else:
             lines.append(f"- {name} ({hours}h): 미등록")
     return "\n".join(lines)
@@ -309,7 +316,7 @@ class BossButton(discord.ui.Button):
             await interaction.followup.send(
                 f"✅ **{self.boss_name} 컷 처리**\n"
                 f"- 컷: <t:{cur['last_cut']}:F>\n"
-                f"- 다음 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
+                f"- 다음 젠: {fmt_kst(ns_after)}",
                 ephemeral=True,
             )
             return
@@ -581,8 +588,7 @@ class BossBot(commands.Bot):
                 # five_before 기준으로 늦게 깨어났더라도 target 이전이면 5분 전 알림 송출
                 # (원치 않으면 아래 if를 now_ts() <= five_before + 2 같은 식으로 더 타이트하게 조정 가능)
                 if now_ts() >= five_before:
-                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: <t:{target_ts}:F> | <t:{target_ts}:R>")  # type: ignore[attr-defined]
-
+                    await channel.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst(target_ts)}")
             # 2) 정시 알림
             wait2 = target_ts - now_ts()
             if wait2 > 0:
@@ -593,7 +599,7 @@ class BossBot(commands.Bot):
                 return
 
             await channel.send(
-                content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: <t:{target_ts}:F> | <t:{target_ts}:R>",
+                content=f"🔔 **{boss_name} 젠타임입니다!**\n- 젠: {fmt_kst(target_ts)}",
                 view=SpawnAlertView(self, boss_name, target_ts),
             )  # type: ignore[attr-defined]
             
