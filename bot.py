@@ -98,19 +98,23 @@ def load_state() -> Dict[str, Any]:
     except Exception:
         data = {}
 
-    # ✅ 반드시 먼저 정의
     handled_alerts = data.get("handled_alerts", {})
+    if not isinstance(handled_alerts, dict):
+        handled_alerts = {}
 
-    # ✅ 패널 메시지 ID들(구버전 호환 포함)
+    # ✅ panel_message_ids (구버전 panel_message_id 호환)
     panel_message_ids = data.get("panel_message_ids")
-    legacy_panel_id = data.get("panel_message_ids")
+    legacy_panel_id = data.get("panel_message_id")  # ✅ 단수 키가 구버전
 
-    if not isinstance(panel_message_ids, dict):
-        panel_message_ids = {"admin": legacy_panel_id, "voice": None}
+    if isinstance(panel_message_ids, int):
+        panel_message_ids = {"admin": panel_message_ids, "voice": None}
+    elif not isinstance(panel_message_ids, dict):
+        panel_message_ids = {"admin": legacy_panel_id if isinstance(legacy_panel_id, int) else None, "voice": None}
 
     bosses_data = data.get("bosses", {})
+    if not isinstance(bosses_data, dict):
+        bosses_data = {}
 
-    # 구조 정규화 (키 누락 방지)
     normalized = {
         "panel_message_ids": {
             "admin": panel_message_ids.get("admin"),
@@ -122,6 +126,8 @@ def load_state() -> Dict[str, Any]:
 
     for name in BOSSES.keys():
         b = bosses_data.get(name, {})
+        if not isinstance(b, dict):
+            b = {}
         normalized["bosses"][name] = {
             "next_spawn": b.get("next_spawn"),
             "last_cut": b.get("last_cut"),
@@ -132,6 +138,13 @@ def load_state() -> Dict[str, Any]:
 
 
 def save_state(state: Dict[str, Any]) -> None:
+    # panel_message_ids가 int로 들어오면 dict로 강제
+    pm = state.get("panel_message_ids")
+    if isinstance(pm, int):
+        state["panel_message_ids"] = {"admin": pm, "voice": None}
+    elif not isinstance(pm, dict):
+        state["panel_message_ids"] = {"admin": None, "voice": None}
+
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
