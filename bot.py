@@ -627,7 +627,20 @@ class BossBot(commands.Bot):
             return
         except Exception as e:
             print(f"[ERROR] alarm task for {boss_name}: {e}")
-
+            
+        async def on_ready(self):
+            print(f"Logged in as: {self.user} (id: {self.user.id})")
+            print(f"Guilds count: {len(self.guilds)}")
+            for g in self.guilds:
+                print(f"- guild: {g.name} ({g.id})")
+    
+        await self.ensure_panel_message()
+            for boss_name in BOSSES.keys():
+                await self.reschedule_boss(boss_name)
+            await self.update_panel_message()
+    
+        async def on_guild_join(self, guild: discord.Guild):
+            print(f"[JOINED] {guild.name} ({guild.id})")
 
 bot = BossBot()
 
