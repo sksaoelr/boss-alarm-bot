@@ -692,7 +692,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
     await interaction.response.send_message(
         f"✅ **{보스} 컷시간 등록 완료**\n"
         f"- 컷: {fmt_kst_rel(cut_ts)}\n"
-        f"- 다음 젠(+{BOSSES[보스]}h): {fmt_kst_rel(next_ts)}",
+        f"- 다음 젠 : {fmt_kst_rel(next_ts)}",
         ephemeral=False,
     )
 
