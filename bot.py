@@ -105,7 +105,16 @@ class BossBot(commands.Bot):
         self.alarm_tasks: Dict[str, asyncio.Task] = {}
 
     async def setup_hook(self):
-        await self.tree.sync()
+        guild_id_raw = os.getenv("GUILD_ID", "").strip()
+
+        if guild_id_raw.isdigit():
+            guild = discord.Object(id=int(guild_id_raw))
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            print(f"[SYNC] guild sync ok: {guild.id}")
+        else:
+            await self.tree.sync()
+            print("[SYNC] global sync ok")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} ({self.user.id})")
