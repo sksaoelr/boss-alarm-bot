@@ -660,5 +660,38 @@ def main():
     bot.run(TOKEN)
 
 
+@bot.tree.command(name="초기화", description="보스의 다음 젠 시간을 미등록 상태로 초기화합니다.")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율")
+async def reset_boss(interaction: discord.Interaction, 보스: str):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        return
+
+    보스 = 보스.strip()
+    if 보스 not in BOSSES:
+        await interaction.response.send_message(
+            f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}",
+            ephemeral=True,
+        )
+        return
+
+    # 상태 초기화
+    bot.state_data["bosses"][보스]["next_spawn"] = None
+    bot.state_data["bosses"][보스]["last_cut"] = None
+    save_state(bot.state_data)
+
+    # 알림 태스크 취소/정리
+    t = bot.alarm_tasks.get(보스)
+    if t and not t.done():
+        t.cancel()
+    bot.alarm_tasks.pop(보스, None)
+
+    await bot.update_panel_message()
+
+    await interaction.response.send_message(
+        f"🧹 **{보스} 초기화 완료**\n- 다음 젠: 미등록",
+        ephemeral=False,
+    )
+
 if __name__ == "__main__":
     main()
