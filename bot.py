@@ -15,6 +15,10 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+def fmt_kst(ts: int) -> str:
+    dt = datetime.datetime.fromtimestamp(ts, KST)
+    return dt.strftime("%m-%d %H:%M")
+
 def fmt_rel(ts: int, now: Optional[int] = None) -> str:
     now = now if now is not None else now_ts()
     diff = ts - now  # +면 미래(후), -면 과거(전)
@@ -61,16 +65,23 @@ KST = pytz.timezone("Asia/Seoul")
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
-CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-VOICE_CHAT_CHANNEL_ID = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
-if not VOICE_CHAT_CHANNEL_ID.isdigit():
+CHANNEL_ID_RAW = os.getenv("CHANNEL_ID", "").strip()
+VOICE_CHAT_CHANNEL_ID_RAW = os.getenv("VOICE_CHAT_CHANNEL_ID", "").strip()
+
+if not TOKEN:
+    raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
+if not CHANNEL_ID_RAW.isdigit():
+    raise SystemExit("CHANNEL_ID 가 올바르지 않습니다. Render Env에 CHANNEL_ID=숫자를 넣어주세요.")
+if not VOICE_CHAT_CHANNEL_ID_RAW.isdigit():
     raise SystemExit("VOICE_CHAT_CHANNEL_ID 가 올바르지 않습니다. Env에 VOICE_CHAT_CHANNEL_ID=숫자를 넣어주세요.")
-VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID)
-ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
-# 패널/버튼 허용 채널(관리채널 + 보이스채팅탭)
+
+CHANNEL_ID = int(CHANNEL_ID_RAW)
+VOICE_CHAT_CHANNEL_ID = int(VOICE_CHAT_CHANNEL_ID_RAW)
+
+# 패널/버튼 허용 채널
 ALLOWED_CHANNEL_IDS = {CHANNEL_ID, VOICE_CHAT_CHANNEL_ID}
 
-# 패널을 띄울 채널들 (키는 상태파일 저장용)
+# 패널을 띄울 채널들
 PANEL_CHANNELS = {
     "admin": CHANNEL_ID,
     # "voice": VOICE_CHAT_CHANNEL_ID,
