@@ -670,7 +670,7 @@ async def show_next(interaction: discord.Interaction):
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
-    lines = ["**다음 젠 목록**"]
+    lines = ["**목록**"]
     for name, hours in BOSSES.items():
         ns = bot.state_data["bosses"][name].get("next_spawn")
         if isinstance(ns, int) and ns > 0:
