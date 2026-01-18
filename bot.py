@@ -325,7 +325,7 @@ class BossButton(discord.ui.Button):
 
         # 3초 제한 때문에 먼저 ACK
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer(ephemeral=False)
 
         state = self.bot.state_data  # type: ignore[attr-defined]
         bosses_data = state["bosses"]
@@ -349,7 +349,7 @@ class BossButton(discord.ui.Button):
                 f"✅ **{self.boss_name} 컷 처리**\n"
                 f"- 컷: <t:{cur['last_cut']}:F>\n"
                 f"- 다음 젠: {fmt_kst(ns_after)}",
-                ephemeral=True,
+                ephemeral=False,
             )
             return
 
@@ -373,7 +373,7 @@ class BossButton(discord.ui.Button):
             f"🟨 **{self.boss_name} 멍 처리** (기존 젠 기준 연장)\n"
             f"- 기존 젠: <t:{ns_before}:F>\n"
             f"- 변경 젠: <t:{ns_after}:F> | <t:{ns_after}:R>",
-            ephemeral=True,
+            ephemeral=False,
         )
 
 
@@ -639,7 +639,7 @@ bot = BossBot()
 @app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초까지는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
-        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=False)
         return
 
     보스 = 보스.strip()
@@ -660,7 +660,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     await interaction.response.send_message(
         f"✅ **{보스} 다음 젠 시간 설정 완료**\n- 다음 젠: {fmt_kst_rel(ts)}",
-        ephemeral=True,
+        ephemeral=False,
     )
 
 
@@ -678,7 +678,7 @@ async def show_next(interaction: discord.Interaction):
         else:
             lines.append(f"- {name}({hours}h): 미등록")
     
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    await interaction.response.send_message("\n".join(lines), ephemeral=False)
 
 def main():
     bot.run(TOKEN)
