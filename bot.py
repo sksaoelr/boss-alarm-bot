@@ -21,6 +21,52 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 KST = pytz.timezone("Asia/Seoul")
 
 
+def parse_cut_time_to_ts(text: str) -> Optional[int]:
+    text = text.strip()
+
+    # YYYY-MM-DD HH:MM(:SS) 는 그대로
+    try:
+        if " " in text and "-" in text:
+            date_part, time_part = text.split(" ", 1)
+            y, m, d = map(int, date_part.split("-"))
+            tparts = list(map(int, time_part.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+            dt = KST.localize(datetime.datetime(y, m, d, hh, mm, ss))
+            return int(dt.timestamp())
+    except Exception:
+        pass
+
+    # HH:MM(:SS) 는 "가장 최근 발생한 시각"으로 해석
+    try:
+        if ":" in text and "-" not in text:
+            tparts = list(map(int, text.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+
+            now = datetime.datetime.now(KST)
+            dt = KST.localize(datetime.datetime(now.year, now.month, now.day, hh, mm, ss))
+
+            # 입력 시간이 "현재보다 미래"면, 가장 최근은 어제 그 시각
+            if dt > now:
+                dt = dt - datetime.timedelta(days=1)
+
+            return int(dt.timestamp())
+    except Exception:
+        pass
+
+    return None
+
 def now_ts() -> int:
     return int(time.time())
 
@@ -628,7 +674,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
         )
         return
 
-    cut_ts = parse_time_to_ts(시간)
+    cut_ts = parse_cut_time_to_ts(시간)
     if cut_ts is None:
         await interaction.response.send_message("시간 형식이 올바르지 않습니다. 예: 21:30 / 2026-01-20 09:10", ephemeral=True)
         return
