@@ -28,6 +28,17 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
         return "지금"
 
     mins = ad // 60
+
+    # 🔴 이미 지난 경우 (미처리 젠)
+    if diff < 0:
+        if mins < 60:
+            return f"🔴 {mins}분 전"
+        hours = mins // 60
+        if hours < 24:
+            return f"🔴 {hours}시간 전"
+        days = hours // 24
+        return f"🔴 {days}일 전"
+    
     if mins < 60:
         return f"{mins}분 {'후' if diff > 0 else '전'}"
 
@@ -440,7 +451,7 @@ class SpawnAlertView(discord.ui.View):
             content=(
                 f"🔔 **{boss} 젠타임입니다!**\n"
                 f"- 예정: {fmt_kst_rel(self.target_ts)}\n\n"
-                f"✅ 처리: **{handled}** (by {interaction.user.mention})\n"
+                f"✅ **{handled}** (by {interaction.user.mention})\n"
                 f"➡️ 다음 젠: {fmt_kst_rel(next_spawn)}"
             ),
             view=None,
@@ -592,7 +603,7 @@ class BossBot(commands.Bot):
             # 정확히 five_before 근처(±2초)일 때만 발송
             if wait1 > 0 and abs(now_ts() - five_before) <= 2:
                 await channel.send(
-                    f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst(target_ts)}"
+                    f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst_rel(target_ts)}"
                 )
     
             # 2) 정시 알림
@@ -608,7 +619,7 @@ class BossBot(commands.Bot):
                 return
     
             await channel.send(
-                content=f"🔔 **{boss_name} 젠타임입니다!**\n- {fmt_kst(target_ts)}",
+                content=f"🔔 **{boss_name} 젠타임입니다!**",
                 view=SpawnAlertView(self, boss_name, target_ts),
             )  # type: ignore[attr-defined]
     
@@ -648,7 +659,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
     await bot.update_panel_message()
 
     await interaction.response.send_message(
-        f"✅ **{보스} 다음 젠 시간 설정 완료**\n- 다음 젠: <t:{ts}:F> | <t:{ts}:R>",
+        f"✅ **{보스} 다음 젠 시간 설정 완료**\n- 다음 젠: {fmt_kst_rel(ts)}",
         ephemeral=True,
     )
 
@@ -663,7 +674,7 @@ async def show_next(interaction: discord.Interaction):
     for name, hours in BOSSES.items():
         ns = bot.state_data["bosses"][name].get("next_spawn")
         if isinstance(ns, int) and ns > 0:
-            lines.append(f"- {name}({hours}h): {fmt_kst(ns)}")
+            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}")
         else:
             lines.append(f"- {name}({hours}h): 미등록")
     
