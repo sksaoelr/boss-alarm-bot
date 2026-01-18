@@ -106,15 +106,18 @@ class BossBot(commands.Bot):
 
     async def setup_hook(self):
         guild_id_raw = os.getenv("GUILD_ID", "").strip()
-
-        if guild_id_raw.isdigit():
-            guild = discord.Object(id=int(guild_id_raw))
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            print(f"[SYNC] guild sync ok: {guild.id}")
-        else:
-            await self.tree.sync()
-            print("[SYNC] global sync ok")
+        if not guild_id_raw.isdigit():
+            raise RuntimeError("GUILD_ID 필요")
+    
+        guild = discord.Object(id=int(guild_id_raw))
+    
+        # 🔥 해당 서버의 명령 전부 초기화
+        self.tree.clear_commands(guild=guild)
+    
+        # 현재 코드에 정의된 명령만 다시 등록
+        await self.tree.sync(guild=guild)
+    
+        print(f"[SYNC] cleaned & synced guild {guild.id}")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} ({self.user.id})")
