@@ -87,12 +87,6 @@ PANEL_CHANNELS = {
     # "voice": VOICE_CHAT_CHANNEL_ID,
 }
 
-
-if not TOKEN:
-    raise SystemExit("DISCORD_TOKEN 이 없습니다. Render Env에 DISCORD_TOKEN을 넣어주세요.")
-if not CHANNEL_ID.isdigit():
-    raise SystemExit("CHANNEL_ID 가 올바르지 않습니다. Render Env에 CHANNEL_ID=숫자를 넣어주세요.")
-
 CHANNEL_ID = int(CHANNEL_ID)
 
 STATE_FILE = "boss_state.json"
