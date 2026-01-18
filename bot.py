@@ -454,6 +454,9 @@ class BossBot(commands.Bot):
         # persistent view 등록
         self.panel_view = BossPanelView(self)
         self.add_view(self.panel_view)
+    
+        # ✅ 기존 명령 정리(글로벌 + 길드)
+        self.tree.clear_commands(guild=None)
 
         # 여러 서버 배포용: 글로벌 sync
         await self.tree.sync()
