@@ -613,8 +613,8 @@ bot = BossBot()
 # -----------------------------
 # Slash Commands
 # -----------------------------
-@bot.tree.command(name="설정", description="보스의 다음 젠 시간을 설정합니다.")
-@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="HH:MM 또는 YYYY-MM-DD HH:MM (초는 :SS)")
+@bot.tree.command(name="설정", description="보스의 컷 시간을 입력하면 다음 젠을 자동 계산해 등록합니다.")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="컷시간: HH:MM 또는 YYYY-MM-DD HH:MM (초는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
@@ -622,22 +622,31 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     보스 = 보스.strip()
     if 보스 not in BOSSES:
-        await interaction.response.send_message(f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}", ephemeral=True)
+        await interaction.response.send_message(
+            f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}",
+            ephemeral=True
+        )
         return
 
-    ts = parse_time_to_ts(시간)
-    if ts is None:
+    cut_ts = parse_time_to_ts(시간)
+    if cut_ts is None:
         await interaction.response.send_message("시간 형식이 올바르지 않습니다. 예: 21:30 / 2026-01-20 09:10", ephemeral=True)
         return
 
-    bot.state_data["bosses"][보스]["next_spawn"] = ts
+    interval_sec = BOSSES[보스] * 3600
+    next_ts = cut_ts + interval_sec
+
+    bot.state_data["bosses"][보스]["last_cut"] = cut_ts
+    bot.state_data["bosses"][보스]["next_spawn"] = next_ts
     save_state(bot.state_data)
 
     await bot.reschedule_boss(보스)
     await bot.update_panel_message()
 
     await interaction.response.send_message(
-        f"✅ **{보스} 다음 젠 시간 설정 완료**\n- 다음 젠: {fmt_kst_rel(ts)}",
+        f"✅ **{보스} 컷시간 등록 완료**\n"
+        f"- 컷: {fmt_kst_rel(cut_ts)}\n"
+        f"- 다음 젠(+{BOSSES[보스]}h): {fmt_kst_rel(next_ts)}",
         ephemeral=False,
     )
 
