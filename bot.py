@@ -2,8 +2,7 @@ import os
 import json
 import asyncio
 import time
-from typing import Dict, Any, Optional
-
+from typing import Dict, Any, Optional, Set
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -97,10 +96,10 @@ threading.Thread(target=run_web, daemon=True).start()
 load_dotenv()
 
 
-def parse_id_set(value: str) -> set[int]:
+def parse_id_set(value: str) -> Set[int]:
     if not value:
         return set()
-    out: set[int] = set()
+    out: Set[int] = set()
     for x in value.split(","):
         x = x.strip()
         if x.isdigit():
