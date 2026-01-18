@@ -274,6 +274,9 @@ def render_panel_text(state: Dict[str, Any]) -> str:
     lines.append("- 컷: 지금 잡힘(현재시간 기준으로 다음 젠 등록)")
     lines.append("- 멍: 미젠(기존 다음 젠 시간 기준으로 +리젠시간 연장)")
     lines.append("- 채팅 설정: `/설정 보스명 시간` (예: `/설정 베지 21:30` 또는 `/설정 베지 2026-01-20 09:10`)")
+    lines.append("- 확인: `/보탐`")
+    lines.append("- 초기화: `/초기화 보스명` 또는 `/초기화전체`")
+    lines.append("- 도움말: `/사용법`")
     lines.append("")
     lines.append(render_panel_text_compact(state))
     return "\n".join(lines)
@@ -639,7 +642,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
     )
 
 
-@bot.tree.command(name="젠타임", description="전체 보스의 다음 젠 시간을 보여줍니다.")
+@bot.tree.command(name="보탐", description="전체 보스의 다음 젠 시간을 보여줍니다.")
 async def show_next(interaction: discord.Interaction):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
@@ -692,6 +695,53 @@ async def reset_boss(interaction: discord.Interaction, 보스: str):
         f"🧹 **{보스} 초기화 완료**\n- 다음 젠: 미등록",
         ephemeral=False,
     )
+
+@bot.tree.command(name="초기화전체", description="전체 보스를 미등록 상태로 초기화합니다.")
+async def reset_all(interaction: discord.Interaction):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        return
+
+    # 상태 초기화
+    for boss in BOSSES.keys():
+        bot.state_data["bosses"][boss]["next_spawn"] = None
+        bot.state_data["bosses"][boss]["last_cut"] = None
+
+        # 알림 태스크 취소/정리
+        t = bot.alarm_tasks.get(boss)
+        if t and not t.done():
+            t.cancel()
+        bot.alarm_tasks.pop(boss, None)
+
+    save_state(bot.state_data)
+    await bot.update_panel_message()
+
+    await interaction.response.send_message("🧹 **전체 보스 초기화 완료**\n- 다음 젠: 모두 미등록", ephemeral=False)
+
+
+@bot.tree.command(name="사용법", description="보스 알람 봇 사용법을 안내합니다.")
+async def help_usage(interaction: discord.Interaction):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
+        await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
+        return
+
+    msg = (
+        "**사용법**\n"
+        "1) **패널 버튼**\n"
+        "- `보스명 컷`: 지금 잡힘 → 현재시간 기준으로 다음 젠 자동 등록\n"
+        "- `보스명 멍`: 미젠/놓침 → 기존 예정시간 기준으로 다음 젠 연장\n\n"
+        "2) **명령어**\n"
+        "- `/설정 보스명 시간` : 다음 젠 수동 설정\n"
+        "  - 예) `/설정 베지 21:30`\n"
+        "  - 예) `/설정 베지 2026-01-20 09:10`\n"
+        "- `/보탐` : 전체 보스 다음 젠 목록 출력\n"
+        "- `/초기화 보스명` : 해당 보스 미등록으로 초기화\n"
+        "- `/초기화전체` : 전체 보스 미등록으로 초기화\n\n"
+        "3) **알림**\n"
+        "- 5분 전 알림 + 정시 알림(정시 알림에는 컷/멍 버튼 포함)"
+    )
+
+    await interaction.response.send_message(msg, ephemeral=False)
 
 if __name__ == "__main__":
     main()
