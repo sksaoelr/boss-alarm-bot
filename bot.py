@@ -111,6 +111,9 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
 def fmt_kst_rel(ts: int) -> str:
     return f"{fmt_kst(ts)} | {fmt_rel(ts)}"
 
+def fmt_kst_only(ts: int) -> str:
+    dt = datetime.datetime.fromtimestamp(ts, KST)
+    return dt.strftime("%m-%d %H:%M")
 
 # -----------------------------
 # 간단 웹 헬스체크 (Render/OCI용)
@@ -477,7 +480,7 @@ class SpawnAlertView(discord.ui.View):
         await interaction.response.edit_message(
             content=(
                 f"🔔 **{boss} 젠타임입니다!**\n"
-                f"- 예정: {fmt_kst_rel(self.target_ts)}\n\n"
+                f"- {fmt_kst_only(self.target_ts)}\n\n"
                 f"✅ **{handled}** (by {interaction.user.mention})\n"
                 f"➡️ 다음 젠: {fmt_kst_rel(next_spawn)}"
             ),
@@ -625,7 +628,7 @@ class BossBot(commands.Bot):
                     ch = await self._get_text_channel(cid)
                     if ch:
                         await ch.send(
-                            f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst_rel(target_ts)}"
+                            f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst_only(target_ts)}"
                         )
 
             # 2) 정시 알림
