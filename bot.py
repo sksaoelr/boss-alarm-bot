@@ -81,6 +81,7 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
     diff = ts - now
     ad = abs(diff)
 
+    # 30초 이내는 그냥 "지금"
     if ad < 30:
         return "지금"
 
@@ -89,24 +90,25 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
     # 지난 경우(미처리 젠)
     if diff < 0:
         if mins < 60:
-            return f"• {mins}분 전"
+            return f"{mins}분 전"
         hours = mins // 60
+        rem = mins % 60
         if hours < 24:
-            return f"• {hours}시간 전"
+            return f"{hours}시간 {rem}분 전"
         days = hours // 24
-        return f"• {days}일 전"
+        return f"{days}일 전"
 
     # 미래
     if mins < 60:
         return f"{mins}분 후"
 
     hours = mins // 60
+    rem = mins % 60
     if hours < 24:
-        return f"{hours}시간 후"
+        return f"{hours}시간 {rem}분 후"
 
     days = hours // 24
     return f"{days}일 후"
-
 
 def fmt_kst_rel(ts: int) -> str:
     return f"{fmt_kst(ts)} | {fmt_rel(ts)}"
@@ -694,8 +696,8 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     await interaction.response.send_message(
         f"✅ **{보스} 수동 등록 완료**\n"
-        f"- 컷or멍: {fmt_kst_rel(cut_ts)}\n"
-        f"- 다음 젠 : {fmt_kst_rel(next_ts)}",
+        f"- 컷or멍: {fmt_kst(cut_ts)} | {fmt_rel(cut_ts)}\n"
+        f"- 다음 젠 : {fmt_kst(next_ts)} | {fmt_rel(next_ts)}",
         ephemeral=False,
     )
 
