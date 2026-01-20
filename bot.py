@@ -548,8 +548,8 @@ class BossBot(commands.Bot):
                         content=(
                             f"🔔 **{boss_name} 젠타임입니다!**\n"
                             f"- 예정: {fmt_kst_only(target_ts)}\n\n"
-                            f"⚠️ 컷/멍 입력이 없어 **다음 젠이 미등록** 처리되었습니다.\n"
-                            f"`/설정` 또는 패널에서 다시 등록해주세요."
+                            f"⚠️ 컷/멍 입력이 없어 **미등록** 처리되었습니다.\n"
+                            f"`/설정`에서 다시 등록해주세요."
                         ),
                         view=None,
                     )
