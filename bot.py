@@ -503,7 +503,7 @@ class BossBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
-
+        self.boss_alarm_tasks = {}  # boss_name -> asyncio.Task
         self.state_data: Dict[str, Any] = load_state()
         self.panel_view: Optional[BossPanelView] = None
         self.alarm_tasks: Dict[str, asyncio.Task] = {}
@@ -511,11 +511,16 @@ class BossBot(commands.Bot):
     async def _auto_mark_unhandled(self, boss_name: str, target_ts: int, msg_id: int, channel_id: int):
         try:
             await asyncio.sleep(AUTO_UNHANDLED_SEC)
-
+            
             state = self.state_data
             handled_alerts = state.setdefault("handled_alerts", {})
             key = str(msg_id)
 
+            # ✅ 추가: /설정 등으로 일정이 바뀌었으면 이 미입력 처리는 무시
+            latest_ns = state["bosses"][boss_name].get("next_spawn")
+            if latest_ns != target_ts:
+                return
+            
             # 이미 컷/멍 처리됐으면 종료
             if handled_alerts.get(key):
                 return
