@@ -197,6 +197,7 @@ BOSSES: Dict[str, int] = {
 }
 
 FIVE_MIN = 5 * 60
+AUTO_UNHANDLED_SEC = 120 * 60  # 정시 알림 후 30분 동안 미처리면 '미입력' 처리
 
 
 # -----------------------------
@@ -206,7 +207,7 @@ def load_state() -> Dict[str, Any]:
     if not os.path.exists(STATE_FILE):
         return {
             "panel_message_ids": {k: None for k in PANEL_CHANNELS.keys()},
-            "bosses": {name: {"next_spawn": None, "last_cut": None} for name in BOSSES.keys()},
+            "bosses": {name: {"next_spawn": None, "last_cut": None, "miss_count": 0} for name in BOSSES.keys()},
             "handled_alerts": {},
         }
 
@@ -244,6 +245,7 @@ def load_state() -> Dict[str, Any]:
         normalized["bosses"][name] = {
             "next_spawn": b.get("next_spawn"),
             "last_cut": b.get("last_cut"),
+            "miss_count": int(b.get("miss_count") or 0),
         }
 
     return normalized
@@ -476,6 +478,7 @@ class SpawnAlertView(discord.ui.View):
             next_spawn = base + interval_sec
 
         cur["next_spawn"] = next_spawn
+        cur["miss_count"] = 0
         save_state(state)
 
         handled = "컷" if action == "컷" else "멍"
@@ -505,6 +508,61 @@ class BossBot(commands.Bot):
         self.panel_view: Optional[BossPanelView] = None
         self.alarm_tasks: Dict[str, asyncio.Task] = {}
 
+    async def _auto_mark_unhandled(self, boss_name: str, target_ts: int, msg_id: int, channel_id: int):
+        try:
+            await asyncio.sleep(AUTO_UNHANDLED_SEC)
+
+            state = self.state_data
+            handled_alerts = state.setdefault("handled_alerts", {})
+            key = str(msg_id)
+
+            # 이미 컷/멍 처리됐으면 종료
+            if handled_alerts.get(key):
+                return
+
+            # 미입력 처리 기록(중복 방지)
+            handled_alerts[key] = {
+                "boss": boss_name,
+                "action": "미입력",
+                "by": None,
+                "at": now_ts(),
+                "target_ts": target_ts,
+            }
+
+            cur = state["bosses"][boss_name]
+            cur["miss_count"] = int(cur.get("miss_count") or 0) + 1
+
+            # 다음 젠은 불확실 -> 미등록 처리
+            cur["next_spawn"] = None
+            cur["last_cut"] = None
+
+            save_state(state)
+
+            # 메시지 편집(버튼 제거)
+            ch = await self._get_text_channel(channel_id)
+            if ch:
+                try:
+                    msg = await ch.fetch_message(msg_id)  # type: ignore[attr-defined]
+                    n = cur["miss_count"]
+                    await msg.edit(
+                        content=(
+                            f"🔔 **{boss_name} 젠타임입니다!**\n"
+                            f"- 예정: {fmt_kst_only(target_ts)}\n\n"
+                            f"⚠️ 컷/멍 입력이 없어 **다음 젠이 미등록** 처리되었습니다.\n"
+                            f"`/설정` 또는 패널에서 다시 등록해주세요."
+                        ),
+                        view=None,
+                    )
+                except Exception:
+                    pass
+
+            await self.update_panel_message()
+
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[ERROR] auto_mark_unhandled for {boss_name}: {e}")
+    
     async def setup_hook(self):
         # persistent view 등록
         self.panel_view = BossPanelView(self)
@@ -647,10 +705,20 @@ class BossBot(commands.Bot):
             for cid in ALERT_CHANNEL_IDS:
                 ch = await self._get_text_channel(cid)
                 if ch:
-                    await ch.send(
+                    msg = await ch.send(
                         content=f"🔔 **{boss_name} 젠타임입니다!**",
                         view=SpawnAlertView(self, boss_name, target_ts),
                     )  # type: ignore[attr-defined]
+
+                    # 미입력 자동 처리 예약
+                    asyncio.create_task(
+                        self._auto_mark_unhandled(
+                            boss_name=boss_name,
+                            target_ts=target_ts,
+                            msg_id=msg.id,
+                            channel_id=cid,
+                        )
+                    )
 
         except asyncio.CancelledError:
             return
