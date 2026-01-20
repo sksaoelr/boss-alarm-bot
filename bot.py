@@ -768,7 +768,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
     await bot.update_panel_message()
 
     await interaction.response.send_message(
-        f"✅ **{보스} 수동 등록 완료**\n"
+        f"✅ **{보스} 설정 완료** (기존 예약 덮어씀)**\n"
         f"- 컷or멍: {fmt_kst(cut_ts)} | {fmt_rel(cut_ts)}\n"
         f"- 다음 젠 : {fmt_kst(next_ts)} | {fmt_rel(next_ts)}",
         ephemeral=False,
