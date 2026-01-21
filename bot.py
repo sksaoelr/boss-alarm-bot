@@ -738,7 +738,7 @@ bot = BossBot()
 # Slash Commands
 # -----------------------------
 @bot.tree.command(name="설정", description="보스의 컷 시간을 입력하면 다음 젠을 자동 계산해 등록합니다.")
-@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="컷시간: HH:MM 또는 YYYY-MM-DD HH:MM (초는 :SS)")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="컷시간: HH:MM ex)21:00(시간:분")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
