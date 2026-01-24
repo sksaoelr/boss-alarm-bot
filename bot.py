@@ -247,12 +247,26 @@ def load_state() -> Dict[str, Any]:
         b = bosses_data.get(name, {})
         if not isinstance(b, dict):
             b = {}
+        ns = b.get("next_spawn")
+        mc = int(b.get("miss_count", 0) or 0)
+        
+        if isinstance(ns, int) and ns > 0:
+            tail = f" | 미입력 {mc}회" if mc > 0 else ""
+            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
+        else:
+            # ✅ 미등록이면 미입력 표시하지 않음
+            lines.append(f"- {name} ({hours}h): 미등록")
+        
+        # ✅ 미등록이면 미입력 의미 없음 → 정리
+        if not (isinstance(ns, int) and ns > 0):
+            mc = 0
+        
         normalized["bosses"][name] = {
-            "next_spawn": b.get("next_spawn"),
+            "next_spawn": ns,
             "last_cut": b.get("last_cut"),
-            "miss_count": int(b.get("miss_count", 0) or 0),  # ✅ 보장
+            "miss_count": mc,
         }
-
+        
     return normalized
 
 
@@ -321,12 +335,13 @@ def render_panel_text_compact(state: Dict[str, Any]) -> str:
         b = bosses_data[name]
         ns = b.get("next_spawn")
         mc = int(b.get("miss_count", 0) or 0)
-        tail = f" | 미입력 {mc}회" if mc > 0 else ""
-
+        
         if isinstance(ns, int) and ns > 0:
+            tail = f" | 미입력 {mc}회" if mc > 0 else ""
             lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
         else:
-            lines.append(f"- {name} ({hours}h): 미등록{tail}")
+            # ✅ 미등록이면 미입력 표시하지 않음
+            lines.append(f"- {name} ({hours}h): 미등록")
 
     return "\n".join(lines)
 
