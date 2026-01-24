@@ -67,6 +67,7 @@ def parse_cut_time_to_ts(text: str) -> Optional[int]:
 
     return None
 
+
 def now_ts() -> int:
     return int(time.time())
 
@@ -81,7 +82,6 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
     diff = ts - now
     ad = abs(diff)
 
-    # 30초 이내는 그냥 "지금"
     if ad < 30:
         return "지금"
 
@@ -90,32 +90,33 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
     # 지난 경우(미처리 젠)
     if diff < 0:
         if mins < 60:
-            return f"{mins}분 전"
+            return f"• {mins}분 전"
         hours = mins // 60
-        rem = mins % 60
         if hours < 24:
-            return f"{hours}시간 {rem}분 전"
+            return f"• {hours}시간 전"
         days = hours // 24
-        return f"{days}일 전"
+        return f"• {days}일 전"
 
     # 미래
     if mins < 60:
         return f"{mins}분 후"
 
     hours = mins // 60
-    rem = mins % 60
     if hours < 24:
-        return f"{hours}시간 {rem}분 후"
+        return f"{hours}시간 후"
 
     days = hours // 24
     return f"{days}일 후"
 
+
 def fmt_kst_rel(ts: int) -> str:
     return f"{fmt_kst(ts)} | {fmt_rel(ts)}"
+
 
 def fmt_kst_only(ts: int) -> str:
     dt = datetime.datetime.fromtimestamp(ts, KST)
     return dt.strftime("%m-%d %H:%M")
+
 
 # -----------------------------
 # 간단 웹 헬스체크 (Render/OCI용)
@@ -134,7 +135,6 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 def run_web():
     port = int(os.environ.get("PORT", 3000))
-    from http.server import HTTPServer
     server = HTTPServer(("0.0.0.0", port), SimpleHandler)
     server.serve_forever()
 
@@ -197,7 +197,9 @@ BOSSES: Dict[str, int] = {
 }
 
 FIVE_MIN = 5 * 60
-AUTO_UNHANDLED_SEC = 120 * 60  # 정시 알림 후 30분 동안 미처리면 '미입력' 처리
+
+# ✅ 자동 미입력(자동 멍) 유예시간: 2시간
+AUTO_UNHANDLED_SEC = 120 * 60
 
 
 # -----------------------------
@@ -207,7 +209,10 @@ def load_state() -> Dict[str, Any]:
     if not os.path.exists(STATE_FILE):
         return {
             "panel_message_ids": {k: None for k in PANEL_CHANNELS.keys()},
-            "bosses": {name: {"next_spawn": None, "last_cut": None, "miss_count": 0} for name in BOSSES.keys()},
+            "bosses": {
+                name: {"next_spawn": None, "last_cut": None, "miss_count": 0}
+                for name in BOSSES.keys()
+            },
             "handled_alerts": {},
         }
 
@@ -245,7 +250,7 @@ def load_state() -> Dict[str, Any]:
         normalized["bosses"][name] = {
             "next_spawn": b.get("next_spawn"),
             "last_cut": b.get("last_cut"),
-            "miss_count": int(b.get("miss_count") or 0),
+            "miss_count": int(b.get("miss_count", 0) or 0),  # ✅ 보장
         }
 
     return normalized
@@ -313,11 +318,16 @@ def render_panel_text_compact(state: Dict[str, Any]) -> str:
     bosses_data = state["bosses"]
 
     for name, hours in BOSSES.items():
-        ns = bosses_data[name].get("next_spawn")
+        b = bosses_data[name]
+        ns = b.get("next_spawn")
+        mc = int(b.get("miss_count", 0) or 0)
+        tail = f" | 미입력 {mc}회" if mc > 0 else ""
+
         if isinstance(ns, int) and ns > 0:
-            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}")
+            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
         else:
-            lines.append(f"- {name} ({hours}h): 미등록")
+            lines.append(f"- {name} ({hours}h): 미등록{tail}")
+
     return "\n".join(lines)
 
 
@@ -392,6 +402,7 @@ class BossButton(discord.ui.Button):
             base = now_ts()
             cur["last_cut"] = base
             cur["next_spawn"] = base + interval_sec
+            cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
             save_state(state)
 
             await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
@@ -413,6 +424,7 @@ class BossButton(discord.ui.Button):
             return
 
         cur["next_spawn"] = ns_before + interval_sec
+        cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
         save_state(state)
 
         await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
@@ -478,16 +490,16 @@ class SpawnAlertView(discord.ui.View):
             next_spawn = base + interval_sec
 
         cur["next_spawn"] = next_spawn
-        cur["miss_count"] = 0
+        cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
         save_state(state)
 
         handled = "컷" if action == "컷" else "멍"
         await interaction.response.edit_message(
             content=(
                 f"🔔 **{boss} 젠타임입니다!**\n"
-                f"- {fmt_kst_only(self.target_ts)}\n\n"
+                f"- 예정: {fmt_kst_only(self.target_ts)}\n\n"
                 f"✅ **{handled}** (by {interaction.user.mention})\n"
-                f"➡️ 다음 젠: {fmt_kst_rel(next_spawn)}"
+                f"➡️ 다음 젠(예정): {fmt_kst_rel(next_spawn)}"
             ),
             view=None,
         )
@@ -503,77 +515,14 @@ class BossBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
-        self.boss_alarm_tasks = {}  # boss_name -> asyncio.Task
+
         self.state_data: Dict[str, Any] = load_state()
         self.panel_view: Optional[BossPanelView] = None
         self.alarm_tasks: Dict[str, asyncio.Task] = {}
 
-    async def _auto_mark_unhandled(self, boss_name: str, target_ts: int, msg_id: int, channel_id: int):
-        try:
-            await asyncio.sleep(AUTO_UNHANDLED_SEC)
-            
-            state = self.state_data
-            handled_alerts = state.setdefault("handled_alerts", {})
-            key = str(msg_id)
-
-            # ✅ 추가: /설정 등으로 일정이 바뀌었으면 이 미입력 처리는 무시
-            latest_ns = state["bosses"][boss_name].get("next_spawn")
-            if latest_ns != target_ts:
-                return
-            
-            # 이미 컷/멍 처리됐으면 종료
-            if handled_alerts.get(key):
-                return
-
-            # 미입력 처리 기록(중복 방지)
-            handled_alerts[key] = {
-                "boss": boss_name,
-                "action": "미입력",
-                "by": None,
-                "at": now_ts(),
-                "target_ts": target_ts,
-            }
-
-            cur = state["bosses"][boss_name]
-            cur["miss_count"] = int(cur.get("miss_count") or 0) + 1
-
-            # 다음 젠은 불확실 -> 미등록 처리
-            cur["next_spawn"] = None
-            cur["last_cut"] = None
-
-            save_state(state)
-
-            # 메시지 편집(버튼 제거)
-            ch = await self._get_text_channel(channel_id)
-            if ch:
-                try:
-                    msg = await ch.fetch_message(msg_id)  # type: ignore[attr-defined]
-                    n = cur["miss_count"]
-                    await msg.edit(
-                        content=(
-                            f"🔔 **{boss_name} 젠타임입니다!**\n"
-                            f"- 예정: {fmt_kst_only(target_ts)}\n\n"
-                            f"⚠️ 컷/멍 입력이 없어 **미등록** 처리되었습니다.\n"
-                            f"`/설정`에서 다시 등록해주세요."
-                        ),
-                        view=None,
-                    )
-                except Exception:
-                    pass
-
-            await self.update_panel_message()
-
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[ERROR] auto_mark_unhandled for {boss_name}: {e}")
-    
     async def setup_hook(self):
-        # persistent view 등록
         self.panel_view = BossPanelView(self)
         self.add_view(self.panel_view)
-
-        # 여러 서버 배포용: 글로벌 sync
         await self.tree.sync()
 
     async def on_ready(self):
@@ -588,9 +537,6 @@ class BossBot(commands.Bot):
             await self.reschedule_boss(boss_name)
 
         await self.update_panel_message()
-
-    async def on_guild_join(self, guild: discord.Guild):
-        print(f"[JOINED] {guild.name} ({guild.id})")
 
     async def _get_text_channel(self, cid: int):
         ch = self.get_channel(cid)
@@ -675,11 +621,55 @@ class BossBot(commands.Bot):
 
         self.alarm_tasks[boss_name] = asyncio.create_task(self._alarm_task(boss_name, ns))
 
+    async def _auto_mark_unhandled(self, boss_name: str, target_ts: int, msg: discord.Message):
+        # ✅ 정시 알림 후 유예시간
+        await asyncio.sleep(AUTO_UNHANDLED_SEC)
+
+        state = self.state_data
+
+        # 이미 처리되었는지(컷/멍 클릭) 확인
+        handled_alerts = state.get("handled_alerts", {})
+        if handled_alerts.get(str(msg.id)):
+            return
+
+        # 최신 next_spawn가 target_ts에서 바뀌었으면 중단(다른 입력이 들어온 케이스)
+        latest = state["bosses"][boss_name].get("next_spawn")
+        if latest != target_ts:
+            return
+
+        cur = state["bosses"][boss_name]
+        cur["miss_count"] = int(cur.get("miss_count", 0) or 0) + 1
+
+        interval_sec = BOSSES[boss_name] * 3600
+
+        # ✅ 옵션 A: 미입력 = 자동 멍 (원 예정시간 기준)
+        next_spawn = target_ts + interval_sec
+        cur["next_spawn"] = next_spawn
+        save_state(state)
+
+        # ✅ 메시지 edit (요청한 포맷)
+        try:
+            await msg.edit(
+                content=(
+                    f"🔔 **{boss_name} 젠타임입니다!**\n"
+                    f"- 예정: {fmt_kst_only(target_ts)}\n\n"
+                    f"⚠️ 자동 멍 처리되었습니다. (미입력 {cur['miss_count']}회)\n"
+                    f"➡️ 다음 젠(예정): {fmt_kst_rel(next_spawn)}"
+                ),
+                view=None,
+            )
+        except Exception:
+            # 메시지 삭제/권한 문제 등은 무시
+            pass
+
+        await self.reschedule_boss(boss_name)
+        await self.update_panel_message()
+
     async def _alarm_task(self, boss_name: str, target_ts: int):
         try:
             five_before = target_ts - FIVE_MIN
 
-            # 1) 5분 전 알림 (정확히 5분 전 근처에만)
+            # 1) 5분 전 알림
             wait1 = five_before - now_ts()
             if wait1 > 0:
                 await asyncio.sleep(wait1)
@@ -715,15 +705,8 @@ class BossBot(commands.Bot):
                         view=SpawnAlertView(self, boss_name, target_ts),
                     )  # type: ignore[attr-defined]
 
-                    # 미입력 자동 처리 예약
-                    asyncio.create_task(
-                        self._auto_mark_unhandled(
-                            boss_name=boss_name,
-                            target_ts=target_ts,
-                            msg_id=msg.id,
-                            channel_id=cid,
-                        )
-                    )
+                    # ✅ 자동 미입력(자동 멍) 감시 시작
+                    asyncio.create_task(self._auto_mark_unhandled(boss_name, target_ts, msg))
 
         except asyncio.CancelledError:
             return
@@ -738,7 +721,7 @@ bot = BossBot()
 # Slash Commands
 # -----------------------------
 @bot.tree.command(name="설정", description="보스의 컷 시간을 입력하면 다음 젠을 자동 계산해 등록합니다.")
-@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="컷시간: HH:MM ex)21:00(시간:분")
+@app_commands.describe(보스="베지/멘지/부활/각성/악계/인과율", 시간="컷시간: HH:MM 또는 YYYY-MM-DD HH:MM (초는 :SS)")
 async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: str):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
@@ -762,15 +745,16 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     bot.state_data["bosses"][보스]["last_cut"] = cut_ts
     bot.state_data["bosses"][보스]["next_spawn"] = next_ts
+    bot.state_data["bosses"][보스]["miss_count"] = 0  # ✅ 설정하면 리셋
     save_state(bot.state_data)
 
     await bot.reschedule_boss(보스)
     await bot.update_panel_message()
 
     await interaction.response.send_message(
-        f"✅ **{보스} 설정 완료** (기존 예약 덮어씀)**\n"
-        f"- 컷or멍: {fmt_kst(cut_ts)} | {fmt_rel(cut_ts)}\n"
-        f"- 다음 젠 : {fmt_kst(next_ts)} | {fmt_rel(next_ts)}",
+        f"✅ **{보스} 컷시간 등록 완료**\n"
+        f"- 컷: {fmt_kst_rel(cut_ts)}\n"
+        f"- 다음 젠(예정): {fmt_kst_rel(next_ts)}",
         ephemeral=False,
     )
 
@@ -783,17 +767,17 @@ async def show_next(interaction: discord.Interaction):
 
     lines = ["**목록**"]
     for name, hours in BOSSES.items():
-        ns = bot.state_data["bosses"][name].get("next_spawn")
+        b = bot.state_data["bosses"][name]
+        ns = b.get("next_spawn")
+        mc = int(b.get("miss_count", 0) or 0)
+        tail = f" | 미입력 {mc}회" if mc > 0 else ""
+
         if isinstance(ns, int) and ns > 0:
-            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}")
+            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
         else:
-            lines.append(f"- {name} ({hours}h): 미등록")
+            lines.append(f"- {name} ({hours}h): 미등록{tail}")
 
     await interaction.response.send_message("\n".join(lines), ephemeral=False)
-
-
-def main():
-    bot.run(TOKEN)
 
 
 @bot.tree.command(name="초기화", description="보스의 다음 젠 시간을 미등록 상태로 초기화합니다.")
@@ -811,12 +795,11 @@ async def reset_boss(interaction: discord.Interaction, 보스: str):
         )
         return
 
-    # 상태 초기화
     bot.state_data["bosses"][보스]["next_spawn"] = None
     bot.state_data["bosses"][보스]["last_cut"] = None
+    bot.state_data["bosses"][보스]["miss_count"] = 0  # ✅ 초기화하면 리셋
     save_state(bot.state_data)
 
-    # 알림 태스크 취소/정리
     t = bot.alarm_tasks.get(보스)
     if t and not t.done():
         t.cancel()
@@ -829,18 +812,18 @@ async def reset_boss(interaction: discord.Interaction, 보스: str):
         ephemeral=False,
     )
 
+
 @bot.tree.command(name="초기화전체", description="전체 보스를 미등록 상태로 초기화합니다.")
 async def reset_all(interaction: discord.Interaction):
     if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
         await interaction.response.send_message("이 명령어는 지정 채널에서만 사용해주세요.", ephemeral=True)
         return
 
-    # 상태 초기화
     for boss in BOSSES.keys():
         bot.state_data["bosses"][boss]["next_spawn"] = None
         bot.state_data["bosses"][boss]["last_cut"] = None
+        bot.state_data["bosses"][boss]["miss_count"] = 0  # ✅ 초기화하면 리셋
 
-        # 알림 태스크 취소/정리
         t = bot.alarm_tasks.get(boss)
         if t and not t.done():
             t.cancel()
@@ -864,18 +847,24 @@ async def help_usage(interaction: discord.Interaction):
         "- `보스명 컷`: 지금 잡힘 → 현재시간 기준으로 다음 젠 자동 등록\n"
         "- `보스명 멍`: 미젠/놓침 → 기존 예정시간 기준으로 다음 젠 연장\n\n"
         "2) **명령어**\n"
-        "- `/설정 보스명 시간` : 다음 젠 수동 설정\n"
+        "- `/설정 보스명 시간` : 컷시간 입력 → 다음 젠 자동 계산\n"
         "  - 예) `/설정 베지 21:30`\n"
         "  - 예) `/설정 베지 2026-01-20 09:10`\n"
-        "  - 인과,악계=12시간, 각,부,멘,베=6시간 뒤로 설정됨\n"
-        "- `/보탐` : 전체 보스 다음 젠 목록 출력\n"
+        "  - 인과/악계=12시간, 각/부/멘/베=6시간\n"
+        "- `/보탐` : 전체 보스 다음 젠 목록 출력(미입력 횟수 포함)\n"
         "- `/초기화 보스명` : 해당 보스 미등록으로 초기화\n"
         "- `/초기화전체` : 전체 보스 미등록으로 초기화\n\n"
         "3) **알림**\n"
-        "- 5분 전 알림 + 정시 알림(정시 알림에는 컷/멍 버튼 포함)"
+        "- 5분 전 알림 + 정시 알림(정시 알림에는 컷/멍 버튼 포함)\n"
+        f"- 정시 알림 후 {AUTO_UNHANDLED_SEC // 60}분 동안 미입력 시: 자동 멍 처리 + 미입력 누적"
     )
 
     await interaction.response.send_message(msg, ephemeral=False)
+
+
+def main():
+    bot.run(TOKEN)
+
 
 if __name__ == "__main__":
     main()
