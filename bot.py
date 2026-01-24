@@ -14,58 +14,10 @@ import pytz
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-
 # -----------------------------
 # 기본 설정 / 유틸
 # -----------------------------
 KST = pytz.timezone("Asia/Seoul")
-
-
-def parse_cut_time_to_ts(text: str) -> Optional[int]:
-    text = text.strip()
-
-    # YYYY-MM-DD HH:MM(:SS) 는 그대로
-    try:
-        if " " in text and "-" in text:
-            date_part, time_part = text.split(" ", 1)
-            y, m, d = map(int, date_part.split("-"))
-            tparts = list(map(int, time_part.split(":")))
-            if len(tparts) == 2:
-                hh, mm = tparts
-                ss = 0
-            elif len(tparts) == 3:
-                hh, mm, ss = tparts
-            else:
-                return None
-            dt = KST.localize(datetime.datetime(y, m, d, hh, mm, ss))
-            return int(dt.timestamp())
-    except Exception:
-        pass
-
-    # HH:MM(:SS) 는 "가장 최근 발생한 시각"으로 해석
-    try:
-        if ":" in text and "-" not in text:
-            tparts = list(map(int, text.split(":")))
-            if len(tparts) == 2:
-                hh, mm = tparts
-                ss = 0
-            elif len(tparts) == 3:
-                hh, mm, ss = tparts
-            else:
-                return None
-
-            now = datetime.datetime.now(KST)
-            dt = KST.localize(datetime.datetime(now.year, now.month, now.day, hh, mm, ss))
-
-            # 입력 시간이 "현재보다 미래"면, 가장 최근은 어제 그 시각
-            if dt > now:
-                dt = dt - datetime.timedelta(days=1)
-
-            return int(dt.timestamp())
-    except Exception:
-        pass
-
-    return None
 
 
 def now_ts() -> int:
@@ -87,15 +39,15 @@ def fmt_rel(ts: int, now: Optional[int] = None) -> str:
 
     mins = ad // 60
 
-    # 지난 경우(미처리 젠)
+    # 지난 경우
     if diff < 0:
         if mins < 60:
-            return f"• {mins}분 전"
+            return f"{mins}분 전"
         hours = mins // 60
         if hours < 24:
-            return f"• {hours}시간 전"
+            return f"{hours}시간 전"
         days = hours // 24
-        return f"• {days}일 전"
+        return f"{days}일 전"
 
     # 미래
     if mins < 60:
@@ -118,8 +70,59 @@ def fmt_kst_only(ts: int) -> str:
     return dt.strftime("%m-%d %H:%M")
 
 
+def parse_cut_time_to_ts(text: str) -> Optional[int]:
+    """
+    /설정에서 '컷 시간'으로 쓰는 입력 파서.
+    - 'YYYY-MM-DD HH:MM(:SS)' : 해당 시각(KST)
+    - 'HH:MM(:SS)' : 가장 최근 발생한 시각(미래면 어제로 해석)
+    """
+    text = text.strip()
+
+    # YYYY-MM-DD HH:MM(:SS)
+    try:
+        if " " in text and "-" in text:
+            date_part, time_part = text.split(" ", 1)
+            y, m, d = map(int, date_part.split("-"))
+            tparts = list(map(int, time_part.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+            dt = KST.localize(datetime.datetime(y, m, d, hh, mm, ss))
+            return int(dt.timestamp())
+    except Exception:
+        pass
+
+    # HH:MM(:SS) -> 가장 최근 발생한 시각
+    try:
+        if ":" in text and "-" not in text:
+            tparts = list(map(int, text.split(":")))
+            if len(tparts) == 2:
+                hh, mm = tparts
+                ss = 0
+            elif len(tparts) == 3:
+                hh, mm, ss = tparts
+            else:
+                return None
+
+            now = datetime.datetime.now(KST)
+            dt = KST.localize(datetime.datetime(now.year, now.month, now.day, hh, mm, ss))
+
+            if dt > now:
+                dt = dt - datetime.timedelta(days=1)
+
+            return int(dt.timestamp())
+    except Exception:
+        pass
+
+    return None
+
+
 # -----------------------------
-# 간단 웹 헬스체크 (Render/OCI용)
+# 간단 웹 헬스체크 (OCI/Render 유지용)
 # -----------------------------
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -140,7 +143,6 @@ def run_web():
 
 
 threading.Thread(target=run_web, daemon=True).start()
-
 
 # -----------------------------
 # ENV / 채널 설정
@@ -180,7 +182,7 @@ ALLOWED_CHANNEL_IDS = ALLOWED_CHANNEL_IDS_ENV or {CHANNEL_ID, VOICE_CHAT_CHANNEL
 # 알림 채널(복수): 없으면 기본 1개
 ALERT_CHANNEL_IDS = parse_id_set(os.getenv("ALERT_CHANNEL_IDS", "").strip()) or {VOICE_CHAT_CHANNEL_ID}
 
-# 패널을 띄울 채널들(원하면 여기도 복수로 확장 가능)
+# 패널을 띄울 채널들
 PANEL_CHANNELS = {
     "admin": CHANNEL_ID,
 }
@@ -198,7 +200,7 @@ BOSSES: Dict[str, int] = {
 
 FIVE_MIN = 5 * 60
 
-# ✅ 자동 미입력(자동 멍) 유예시간: 2시간
+# 자동 미입력(자동 멍) 유예시간: 2시간
 AUTO_UNHANDLED_SEC = 120 * 60
 
 
@@ -209,10 +211,7 @@ def load_state() -> Dict[str, Any]:
     if not os.path.exists(STATE_FILE):
         return {
             "panel_message_ids": {k: None for k in PANEL_CHANNELS.keys()},
-            "bosses": {
-                name: {"next_spawn": None, "last_cut": None, "miss_count": 0}
-                for name in BOSSES.keys()
-            },
+            "bosses": {name: {"next_spawn": None, "last_cut": None, "miss_count": 0} for name in BOSSES.keys()},
             "handled_alerts": {},
         }
 
@@ -228,7 +227,6 @@ def load_state() -> Dict[str, Any]:
 
     panel_message_ids = data.get("panel_message_ids", {})
     if isinstance(panel_message_ids, int):
-        # 구버전 단일 ID 호환
         panel_message_ids = {"admin": panel_message_ids}
     if not isinstance(panel_message_ids, dict):
         panel_message_ids = {}
@@ -237,7 +235,7 @@ def load_state() -> Dict[str, Any]:
     if not isinstance(bosses_data, dict):
         bosses_data = {}
 
-    normalized = {
+    normalized: Dict[str, Any] = {
         "panel_message_ids": {k: panel_message_ids.get(k) for k in PANEL_CHANNELS.keys()},
         "bosses": {},
         "handled_alerts": handled_alerts,
@@ -247,26 +245,20 @@ def load_state() -> Dict[str, Any]:
         b = bosses_data.get(name, {})
         if not isinstance(b, dict):
             b = {}
+
         ns = b.get("next_spawn")
         mc = int(b.get("miss_count", 0) or 0)
-        
-        if isinstance(ns, int) and ns > 0:
-            tail = f" | 미입력 {mc}회" if mc > 0 else ""
-            lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
-        else:
-            # ✅ 미등록이면 미입력 표시하지 않음
-            lines.append(f"- {name} ({hours}h): 미등록")
-        
+
         # ✅ 미등록이면 미입력 의미 없음 → 정리
         if not (isinstance(ns, int) and ns > 0):
             mc = 0
-        
+
         normalized["bosses"][name] = {
             "next_spawn": ns,
             "last_cut": b.get("last_cut"),
             "miss_count": mc,
         }
-        
+
     return normalized
 
 
@@ -276,52 +268,6 @@ def save_state(state: Dict[str, Any]) -> None:
         state["panel_message_ids"] = {k: None for k in PANEL_CHANNELS.keys()}
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-
-
-def parse_time_to_ts(text: str) -> Optional[int]:
-    text = text.strip()
-
-    # YYYY-MM-DD HH:MM(:SS)
-    try:
-        if " " in text and "-" in text:
-            date_part, time_part = text.split(" ", 1)
-            y, m, d = map(int, date_part.split("-"))
-            tparts = list(map(int, time_part.split(":")))
-            if len(tparts) == 2:
-                hh, mm = tparts
-                ss = 0
-            elif len(tparts) == 3:
-                hh, mm, ss = tparts
-            else:
-                return None
-            dt = KST.localize(datetime.datetime(y, m, d, hh, mm, ss))
-            return int(dt.timestamp())
-    except Exception:
-        pass
-
-    # HH:MM(:SS) - 오늘 기준, 이미 지났으면 내일
-    try:
-        if ":" in text and "-" not in text:
-            tparts = list(map(int, text.split(":")))
-            if len(tparts) == 2:
-                hh, mm = tparts
-                ss = 0
-            elif len(tparts) == 3:
-                hh, mm, ss = tparts
-            else:
-                return None
-
-            now = datetime.datetime.now(KST)
-            dt = KST.localize(datetime.datetime(now.year, now.month, now.day, hh, mm, ss))
-            ts = int(dt.timestamp())
-            if ts <= int(now.timestamp()):
-                dt = dt + datetime.timedelta(days=1)
-                ts = int(dt.timestamp())
-            return ts
-    except Exception:
-        pass
-
-    return None
 
 
 # -----------------------------
@@ -335,7 +281,7 @@ def render_panel_text_compact(state: Dict[str, Any]) -> str:
         b = bosses_data[name]
         ns = b.get("next_spawn")
         mc = int(b.get("miss_count", 0) or 0)
-        
+
         if isinstance(ns, int) and ns > 0:
             tail = f" | 미입력 {mc}회" if mc > 0 else ""
             lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
@@ -417,17 +363,14 @@ class BossButton(discord.ui.Button):
             base = now_ts()
             cur["last_cut"] = base
             cur["next_spawn"] = base + interval_sec
-            cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
+            cur["miss_count"] = 0
             save_state(state)
 
             await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
             await self.bot.update_panel_message()           # type: ignore[attr-defined]
 
             ns_after = cur["next_spawn"]
-            await interaction.followup.send(
-                f"✅ **{self.boss_name}** 다음 젠: {fmt_kst_rel(ns_after)}",
-                ephemeral=False,
-            )
+            await interaction.followup.send(f"✅ **{self.boss_name}** 다음 젠: {fmt_kst_rel(ns_after)}", ephemeral=False)
             return
 
         # 멍
@@ -439,17 +382,14 @@ class BossButton(discord.ui.Button):
             return
 
         cur["next_spawn"] = ns_before + interval_sec
-        cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
+        cur["miss_count"] = 0
         save_state(state)
 
         await self.bot.reschedule_boss(self.boss_name)  # type: ignore[attr-defined]
         await self.bot.update_panel_message()           # type: ignore[attr-defined]
 
         ns_after = cur["next_spawn"]
-        await interaction.followup.send(
-            f"🟨 **{self.boss_name}** 변경 젠: {fmt_kst_rel(ns_after)}",
-            ephemeral=False,
-        )
+        await interaction.followup.send(f"🟨 **{self.boss_name}** 변경 젠: {fmt_kst_rel(ns_after)}", ephemeral=False)
 
 
 # -----------------------------
@@ -488,27 +428,23 @@ class SpawnAlertView(discord.ui.View):
             await interaction.response.send_message("⚠️ 이미 처리된 알림입니다.", ephemeral=True)
             return
 
-        handled_alerts[msg_id] = {
-            "boss": boss,
-            "action": action,
-            "by": str(interaction.user.id),
-            "at": now_ts(),
-        }
+        handled_alerts[msg_id] = {"boss": boss, "action": action, "by": str(interaction.user.id), "at": now_ts()}
         save_state(state)
 
         if action == "컷":
             base = now_ts()
             cur["last_cut"] = base
             next_spawn = base + interval_sec
+            handled = "컷"
         else:
             base = self.target_ts
             next_spawn = base + interval_sec
+            handled = "멍"
 
         cur["next_spawn"] = next_spawn
-        cur["miss_count"] = 0  # ✅ 입력 들어오면 리셋
+        cur["miss_count"] = 0
         save_state(state)
 
-        handled = "컷" if action == "컷" else "멍"
         await interaction.response.edit_message(
             content=(
                 f"🔔 **{boss} 젠타임입니다!**\n"
@@ -542,9 +478,6 @@ class BossBot(commands.Bot):
 
     async def on_ready(self):
         print(f"Logged in as: {self.user} (id: {self.user.id})")
-        print(f"Guilds count: {len(self.guilds)}")
-        for g in self.guilds:
-            print(f"- guild: {g.name} ({g.id})")
 
         await self.ensure_panel_message()
 
@@ -637,17 +570,16 @@ class BossBot(commands.Bot):
         self.alarm_tasks[boss_name] = asyncio.create_task(self._alarm_task(boss_name, ns))
 
     async def _auto_mark_unhandled(self, boss_name: str, target_ts: int, msg: discord.Message):
-        # ✅ 정시 알림 후 유예시간
         await asyncio.sleep(AUTO_UNHANDLED_SEC)
 
         state = self.state_data
 
-        # 이미 처리되었는지(컷/멍 클릭) 확인
+        # 이미 버튼으로 처리된 경우
         handled_alerts = state.get("handled_alerts", {})
         if handled_alerts.get(str(msg.id)):
             return
 
-        # 최신 next_spawn가 target_ts에서 바뀌었으면 중단(다른 입력이 들어온 케이스)
+        # 최신 상태가 이미 바뀌었으면(컷/멍/설정 등) 중단
         latest = state["bosses"][boss_name].get("next_spawn")
         if latest != target_ts:
             return
@@ -662,7 +594,6 @@ class BossBot(commands.Bot):
         cur["next_spawn"] = next_spawn
         save_state(state)
 
-        # ✅ 메시지 edit (요청한 포맷)
         try:
             await msg.edit(
                 content=(
@@ -674,7 +605,6 @@ class BossBot(commands.Bot):
                 view=None,
             )
         except Exception:
-            # 메시지 삭제/권한 문제 등은 무시
             pass
 
         await self.reschedule_boss(boss_name)
@@ -684,7 +614,7 @@ class BossBot(commands.Bot):
         try:
             five_before = target_ts - FIVE_MIN
 
-            # 1) 5분 전 알림
+            # 1) 5분 전
             wait1 = five_before - now_ts()
             if wait1 > 0:
                 await asyncio.sleep(wait1)
@@ -697,11 +627,9 @@ class BossBot(commands.Bot):
                 for cid in ALERT_CHANNEL_IDS:
                     ch = await self._get_text_channel(cid)
                     if ch:
-                        await ch.send(
-                            f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst_only(target_ts)}"
-                        )
+                        await ch.send(f"⏰ **{boss_name} 젠 5분전입니다.**\n- 예정: {fmt_kst_only(target_ts)}")
 
-            # 2) 정시 알림
+            # 2) 정시
             wait2 = target_ts - now_ts()
             if wait2 > 0:
                 await asyncio.sleep(wait2)
@@ -720,7 +648,6 @@ class BossBot(commands.Bot):
                         view=SpawnAlertView(self, boss_name, target_ts),
                     )  # type: ignore[attr-defined]
 
-                    # ✅ 자동 미입력(자동 멍) 감시 시작
                     asyncio.create_task(self._auto_mark_unhandled(boss_name, target_ts, msg))
 
         except asyncio.CancelledError:
@@ -744,10 +671,7 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     보스 = 보스.strip()
     if 보스 not in BOSSES:
-        await interaction.response.send_message(
-            f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}", ephemeral=True)
         return
 
     cut_ts = parse_cut_time_to_ts(시간)
@@ -760,16 +684,14 @@ async def set_boss_time(interaction: discord.Interaction, 보스: str, 시간: s
 
     bot.state_data["bosses"][보스]["last_cut"] = cut_ts
     bot.state_data["bosses"][보스]["next_spawn"] = next_ts
-    bot.state_data["bosses"][보스]["miss_count"] = 0  # ✅ 설정하면 리셋
+    bot.state_data["bosses"][보스]["miss_count"] = 0
     save_state(bot.state_data)
 
     await bot.reschedule_boss(보스)
     await bot.update_panel_message()
 
     await interaction.response.send_message(
-        f"✅ **{보스} 컷시간 등록 완료**\n"
-        f"- 컷: {fmt_kst_rel(cut_ts)}\n"
-        f"- 다음 젠(예정): {fmt_kst_rel(next_ts)}",
+        f"✅ **{보스} 컷시간 등록 완료**\n- 컷: {fmt_kst_rel(cut_ts)}\n- 다음 젠(예정): {fmt_kst_rel(next_ts)}",
         ephemeral=False,
     )
 
@@ -785,12 +707,12 @@ async def show_next(interaction: discord.Interaction):
         b = bot.state_data["bosses"][name]
         ns = b.get("next_spawn")
         mc = int(b.get("miss_count", 0) or 0)
-        tail = f" | 미입력 {mc}회" if mc > 0 else ""
 
         if isinstance(ns, int) and ns > 0:
+            tail = f" | 미입력 {mc}회" if mc > 0 else ""
             lines.append(f"- {name} ({hours}h): {fmt_kst_rel(ns)}{tail}")
         else:
-            lines.append(f"- {name} ({hours}h): 미등록{tail}")
+            lines.append(f"- {name} ({hours}h): 미등록")
 
     await interaction.response.send_message("\n".join(lines), ephemeral=False)
 
@@ -804,15 +726,12 @@ async def reset_boss(interaction: discord.Interaction, 보스: str):
 
     보스 = 보스.strip()
     if 보스 not in BOSSES:
-        await interaction.response.send_message(
-            f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"보스명이 올바르지 않습니다. 사용 가능: {', '.join(BOSSES.keys())}", ephemeral=True)
         return
 
     bot.state_data["bosses"][보스]["next_spawn"] = None
     bot.state_data["bosses"][보스]["last_cut"] = None
-    bot.state_data["bosses"][보스]["miss_count"] = 0  # ✅ 초기화하면 리셋
+    bot.state_data["bosses"][보스]["miss_count"] = 0
     save_state(bot.state_data)
 
     t = bot.alarm_tasks.get(보스)
@@ -821,11 +740,7 @@ async def reset_boss(interaction: discord.Interaction, 보스: str):
     bot.alarm_tasks.pop(보스, None)
 
     await bot.update_panel_message()
-
-    await interaction.response.send_message(
-        f"🧹 **{보스} 초기화 완료**\n- 다음 젠: 미등록",
-        ephemeral=False,
-    )
+    await interaction.response.send_message(f"🧹 **{보스} 초기화 완료**\n- 다음 젠: 미등록", ephemeral=False)
 
 
 @bot.tree.command(name="초기화전체", description="전체 보스를 미등록 상태로 초기화합니다.")
@@ -837,7 +752,7 @@ async def reset_all(interaction: discord.Interaction):
     for boss in BOSSES.keys():
         bot.state_data["bosses"][boss]["next_spawn"] = None
         bot.state_data["bosses"][boss]["last_cut"] = None
-        bot.state_data["bosses"][boss]["miss_count"] = 0  # ✅ 초기화하면 리셋
+        bot.state_data["bosses"][boss]["miss_count"] = 0
 
         t = bot.alarm_tasks.get(boss)
         if t and not t.done():
@@ -846,7 +761,6 @@ async def reset_all(interaction: discord.Interaction):
 
     save_state(bot.state_data)
     await bot.update_panel_message()
-
     await interaction.response.send_message("🧹 **전체 보스 초기화 완료**\n- 다음 젠: 모두 미등록", ephemeral=False)
 
 
@@ -865,7 +779,6 @@ async def help_usage(interaction: discord.Interaction):
         "- `/설정 보스명 시간` : 컷시간 입력 → 다음 젠 자동 계산\n"
         "  - 예) `/설정 베지 21:30`\n"
         "  - 예) `/설정 베지 2026-01-20 09:10`\n"
-        "  - 인과/악계=12시간, 각/부/멘/베=6시간\n"
         "- `/보탐` : 전체 보스 다음 젠 목록 출력(미입력 횟수 포함)\n"
         "- `/초기화 보스명` : 해당 보스 미등록으로 초기화\n"
         "- `/초기화전체` : 전체 보스 미등록으로 초기화\n\n"
@@ -873,7 +786,6 @@ async def help_usage(interaction: discord.Interaction):
         "- 5분 전 알림 + 정시 알림(정시 알림에는 컷/멍 버튼 포함)\n"
         f"- 정시 알림 후 {AUTO_UNHANDLED_SEC // 60}분 동안 미입력 시: 자동 멍 처리 + 미입력 누적"
     )
-
     await interaction.response.send_message(msg, ephemeral=False)
 
 
