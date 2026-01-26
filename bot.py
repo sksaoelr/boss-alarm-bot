@@ -597,7 +597,7 @@ class BossBot(commands.Bot):
         try:
             await msg.edit(
                 content=(
-                    f"🔔 **{boss_name} 젠타임입니다!**\n"
+                    f"🔔 **{boss_name} 젠타임입니다! (미입력 {mc}회)**\n"
                     f"- 예정: {fmt_kst_only(target_ts)}\n\n"
                     f"⚠️ 자동 멍 처리되었습니다. (미입력 {cur['miss_count']}회)\n"
                     f"➡️ 다음 젠(예정): {fmt_kst_rel(next_spawn)}"
