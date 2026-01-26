@@ -595,17 +595,19 @@ class BossBot(commands.Bot):
         save_state(state)
 
         try:
+            mc = int(cur.get("miss_count", 0) or 0)
+        
             await msg.edit(
                 content=(
                     f"🔔 **{boss_name} 젠타임입니다! (미입력 {mc}회)**\n"
                     f"- 예정: {fmt_kst_only(target_ts)}\n\n"
-                    f"⚠️ 자동 멍 처리되었습니다. (미입력 {cur['miss_count']}회)\n"
+                    f"⚠️ 자동 멍 처리되었습니다.\n"
                     f"➡️ 다음 젠(예정): {fmt_kst_rel(next_spawn)}"
                 ),
                 view=None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[AUTO_MISS_ERROR] {boss_name} msg_edit failed: {e}")
 
         await self.reschedule_boss(boss_name)
         await self.update_panel_message()
